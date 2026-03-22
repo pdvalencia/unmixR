@@ -1,11 +1,27 @@
 Package: unmixR
-Title: What the Package Does (One Line, Title Case)
-Version: 0.0.0.9000
+Title: Latent Class and Profile Analysis via Mixture Modelling
+Version: 0.1.0
 Authors@R: 
-    person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
-Description: What the package does (one paragraph).
-License: `use_mit_license()`, `use_gpl3_license()` or friends to pick a
-    license
+    person("Pablo D.", "Valencia",
+           role = c("aut", "cre"),
+           email = "pabvalenciam@gmail.com",
+           comment = c(ORCID = "0000-0002-6809-1805"))
+Description: Provides a unified interface for person-centred mixture modelling,
+    including Latent Class Analysis (LCA) and Latent Profile Analysis (LPA).
+    Supports binary, categorical, and continuous indicator variables, as well
+    as mixed measurement models combining different variable types. Structural
+    models include multinomial logistic regression for covariate effects on
+    class membership, and several distal outcome specifications (continuous
+    means, continuous regression, and categorical outcomes with pooled or
+    class-specific effects). Models can be estimated using 1-step, 2-step, or
+    3-step approaches; the 3-step estimator supports BCH and Maximum Likelihood
+    bias corrections. Additional tools include model selection across a range
+    of class solutions (AIC, BIC, SABIC, entropy), a Bootstrap Likelihood Ratio
+    Test (BLRT) for comparing nested models, analytical and bootstrap Wald
+    tests for covariate effects, and bootstrap confidence intervals for odds
+    ratios. All methods are implemented in pure base R with no external
+    dependencies.
+License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
