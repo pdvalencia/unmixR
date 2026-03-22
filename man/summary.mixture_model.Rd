@@ -11,7 +11,7 @@
 \code{\link{fit_mixture}}.}
 
 \item{ref_class}{Integer. The reference latent class for pairwise contrasts.
-Defaults to the last class (\code{K}).}
+Defaults to the first class (\code{1}).}
 
 \item{...}{Currently unused. Present for S3 method compatibility.}
 }

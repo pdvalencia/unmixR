@@ -232,7 +232,7 @@ classification_diagnostics <- function(object) {
 #' @param object A fitted \code{mixture_model} object returned by
 #'   \code{\link{fit_mixture}}.
 #' @param ref_class Integer. The reference latent class for pairwise contrasts.
-#'   Defaults to the last class (\code{K}).
+#'   Defaults to the first class (\code{1}).
 #' @param ... Currently unused. Present for S3 method compatibility.
 #'
 #' @return Invisibly returns \code{NULL}. Called for its printed side-effect.
@@ -246,7 +246,7 @@ classification_diagnostics <- function(object) {
 #' @export
 summary.mixture_model <- function(object, ref_class = NULL, ...) {
   K <- object$n_components
-  if (is.null(ref_class)) ref_class <- K
+  if (is.null(ref_class)) ref_class <- 1
 
   # Input validation: ref_class must be a valid class index.
   # Without this guard the function starts printing output, then crashes
