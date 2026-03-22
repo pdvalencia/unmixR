@@ -143,16 +143,9 @@ fit_cov <- fit_mixture(X, Y = Z,
 
 # Structural model: odds ratios with 95 % CIs (analytical SEs)
 summary(fit_cov)
-```
 
-```{r coef-example}
-# Odds ratios relative to Class 3 (the reference)
-coef(fit_cov, ref_class = 3)
-```
-
-```{r confint-example}
-# Confidence intervals for odds ratios
-confint(fit_cov, ref_class = 3)
+# Changing the reference class to 3
+summary(fit_cov, ref_class = 3)
 ```
 
 ### Hypothesis tests for covariates
@@ -162,7 +155,7 @@ confint(fit_cov, ref_class = 3)
 Fast, no resampling required — uses the observed information matrix.
 
 ```{r wald-analytical}
-analytical_wald_test(fit_cov, term_name = "z1", ref_class = 3)
+analytical_wald_test(fit_cov, term_name = "z1", ref_class = 1)
 ```
 
 #### Bootstrap Wald omnibus test

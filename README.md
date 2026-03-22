@@ -236,6 +236,26 @@ summary(fit_cov)
 #> =========================================================
 #> 
 #> CATEGORICAL LATENT VARIABLE REGRESSION (CLASS PREDICTORS)
+#> Reference Class: 1
+#> ---------------------------------------------------------
+#>                      OR       [95% CI]        P-Value
+#> 
+#> Class 2 ON
+#>   Intercept         1.163  [ 0.802,  1.688]     0.426
+#>   z1                0.211  [ 0.148,  0.301]     0.000
+#> 
+#> Class 3 ON
+#>   Intercept         1.284  [ 0.896,  1.838]     0.173
+#>   z1                0.506  [ 0.380,  0.674]     0.000
+#> =========================================================
+
+# Changing the reference class to 3
+summary(fit_cov, ref_class = 3)
+#> =========================================================
+#>              STRUCTURAL MODEL SUMMARY                    
+#> =========================================================
+#> 
+#> CATEGORICAL LATENT VARIABLE REGRESSION (CLASS PREDICTORS)
 #> Reference Class: 3
 #> ---------------------------------------------------------
 #>                      OR       [95% CI]        P-Value
@@ -250,32 +270,6 @@ summary(fit_cov)
 #> =========================================================
 ```
 
-``` r
-# Odds ratios relative to Class 3 (the reference)
-coef(fit_cov, ref_class = 3)
-#>               Intercept        z1
-#> Class 1       0.7791112 1.9761065
-#> Class 2       0.9062827 0.4166476
-#> Class 3 (Ref) 1.0000000 1.0000000
-```
-
-``` r
-# Confidence intervals for odds ratios
-confint(fit_cov, ref_class = 3)
-#> Calculating Analytical Confidence Intervals (Hessian)...
-#> $Intercept
-#>                  OR Lower Upper
-#> Class 1       0.779 0.544 1.116
-#> Class 2       0.906 0.654 1.256
-#> Class 3 (Ref) 1.000 1.000 1.000
-#> 
-#> $z1
-#>                  OR Lower Upper
-#> Class 1       1.976 1.483 2.633
-#> Class 2       0.417 0.307 0.565
-#> Class 3 (Ref) 1.000 1.000 1.000
-```
-
 ### Hypothesis tests for covariates
 
 #### Analytical Wald test
@@ -283,7 +277,7 @@ confint(fit_cov, ref_class = 3)
 Fast, no resampling required — uses the observed information matrix.
 
 ``` r
-analytical_wald_test(fit_cov, term_name = "z1", ref_class = 3)
+analytical_wald_test(fit_cov, term_name = "z1", ref_class = 1)
 #>   Covariate Wald_Chi2 df p_value     Method
 #> 1        z1     73.45  2       0 Analytical
 ```
