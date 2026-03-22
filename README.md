@@ -1,16 +1,16 @@
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
-# unmixR <img src="man/figures/logo.png" align="right" height="139" alt="" />
+# mixtureEM <img src="man/figures/logo.png" align="right" height="139" alt="" />
 
 <!-- badges: start -->
 
 [![Lifecycle:
 experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](https://lifecycle.r-lib.org/articles/stages.html#experimental)
-[![R-CMD-check](https://github.com/pdvalencia/unmixR/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/pdvalencia/unmixR/actions/workflows/R-CMD-check.yaml)
+[![R-CMD-check](https://github.com/pdvalencia/mixtureEM/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/pdvalencia/mixtureEM/actions/workflows/R-CMD-check.yaml)
 <!-- badges: end -->
 
-**unmixR** is an R package for person-centred mixture modelling. It
+**mixtureEM** is an R package for person-centred mixture modelling. It
 provides a unified, flexible interface for **latent class analysis
 (LCA)** and **latent profile analysis (LPA)**, supporting a wide range
 of measurement models, structural models, and multi-step estimation
@@ -38,7 +38,7 @@ strategies.
 
 ``` r
 # install.packages("pak")
-pak::pak("pdvalencia/unmixR")
+pak::pak("pdvalencia/mixtureEM")
 ```
 
 ## Quick start
@@ -46,7 +46,7 @@ pak::pak("pdvalencia/unmixR")
 ### Binary LCA
 
 ``` r
-library(unmixR)
+library(mixtureEM)
 
 # Simulate binary data from a 3-class population
 set.seed(42)
@@ -358,7 +358,7 @@ result$p_value
 
 ## Citation
 
-If you use unmixR in published research, please cite it as:
+If you use mixtureEM in published research, please cite it as:
 
-    Valencia, P. (2025). unmixR: Latent Class and Profile Analysis in R.
-    R package. https://github.com/pdvalencia/unmixR
+    Valencia, P. (2025). mixtureEM: Latent Class and Profile Analysis in R.
+    R package. https://github.com/pdvalencia/mixtureEM

@@ -1,4 +1,4 @@
-Package: unmixR
+Package: mixtureEM
 Title: Latent Class and Profile Analysis via Mixture Modelling
 Version: 0.1.0
 Authors@R: 
