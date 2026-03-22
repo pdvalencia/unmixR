@@ -50,11 +50,11 @@ library(mixtureEM)
 # Simulate binary data from a 3-class population
 set.seed(42)
 probs <- list(
-  c(0.9, 0.8, 0.7, 0.1, 0.1),  # Class 1: high on items 1–3
-  c(0.1, 0.2, 0.1, 0.9, 0.8),  # Class 2: high on items 4–5
-  c(0.8, 0.8, 0.7, 0.9, 0.9)   # Class 3: high on items 1–5
+  c(0.1, 0.2, 0.1, 0.1, 0.1),  # Class 1: Low on all items
+  c(0.9, 0.8, 0.7, 0.1, 0.1),  # Class 2: High on items 1–3
+  c(0.8, 0.8, 0.7, 0.9, 0.9)   # Class 3: High on all items
 )
-weights <- c(0.4, 0.4, 0.2)
+weights <- c(0.6, 0.3, 0.1)
 n <- 300
 classes <- sample(1:3, n, replace = TRUE, prob = weights)
 X <- t(sapply(classes, function(k) rbinom(5, 1, probs[[k]])))
