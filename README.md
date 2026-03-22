@@ -11,11 +11,10 @@ experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](h
 <!-- badges: end -->
 
 **unmixR** is an R package for person-centred mixture modelling. It
-provides a unified, flexible interface for **Latent Class Analysis
-(LCA)** and **Latent Profile Analysis (LPA)**, supporting a wide range
+provides a unified, flexible interface for **latent class analysis
+(LCA)** and **latent profile analysis (LPA)**, supporting a wide range
 of measurement models, structural models, and multi-step estimation
-strategies — all implemented from scratch in pure base R with no heavy
-dependencies.
+strategies.
 
 ## Features
 
