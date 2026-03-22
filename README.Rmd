@@ -1,0 +1,242 @@
+---
+output: github_document
+---
+
+<!-- README.md is generated from README.Rmd. Please edit that file -->
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.path = "man/figures/README-",
+  out.width = "100%"
+)
+```
+
+# unmixR <img src="man/figures/logo.png" align="right" height="139" alt="" />
+
+<!-- badges: start -->
+[![Lifecycle: experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](https://lifecycle.r-lib.org/articles/stages.html#experimental)
+[![R-CMD-check](https://github.com/pdvalencia/unmixR/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/pdvalencia/unmixR/actions/workflows/R-CMD-check.yaml)
+<!-- badges: end -->
+
+**unmixR** is an R package for person-centred mixture modelling. It provides a unified, flexible interface for **Latent Class Analysis (LCA)** and **Latent Profile Analysis (LPA)**, supporting a wide range of measurement models, structural models, and multi-step estimation strategies — all implemented from scratch in pure base R with no heavy dependencies.
+
+## Features
+
+- **Measurement models:** binary (Bernoulli), categorical (Multinoulli), and continuous (Gaussian) indicators, including missing-data variants
+- **Mixed measurement models:** combine different variable types in a single model via a named-list descriptor
+- **Structural models:** covariate predictors of class membership, and distal outcomes (continuous, categorical — pooled or class-specific regression)
+- **Multi-step estimation:** 1-step (simultaneous), 2-step, and 3-step with **BCH** or **ML** bias correction
+- **Model selection:** AIC, BIC, SABIC, and relative entropy across a range of K
+- **Bootstrap Likelihood Ratio Test (BLRT)** for comparing nested models
+- **Inference for covariates:** analytical Wald tests, bootstrap standard errors, and confidence intervals for odds ratios
+- **Survey weights** support throughout
+
+## Installation
+
+```r
+# install.packages("pak")
+pak::pak("pdvalencia/unmixR")
+```
+
+## Quick start
+
+### Binary LCA
+
+```{r lca-example}
+library(unmixR)
+
+# Simulate binary data from a 3-class population
+set.seed(42)
+probs <- list(
+  c(0.9, 0.8, 0.7, 0.1, 0.1),  # Class 1: high on items 1–3
+  c(0.1, 0.2, 0.1, 0.9, 0.8),  # Class 2: high on items 4–5
+  c(0.5, 0.5, 0.5, 0.5, 0.5)   # Class 3: uniform
+)
+weights <- c(0.4, 0.4, 0.2)
+n <- 300
+classes <- sample(1:3, n, replace = TRUE, prob = weights)
+X <- t(sapply(classes, function(k) rbinom(5, 1, probs[[k]])))
+
+# Fit a 3-class LCA
+fit <- fit_mixture(X,
+                   n_components  = 3,
+                   measurement   = "binary",
+                   n_init        = 5,
+                   random_state  = 42)
+print(fit)
+```
+
+```{r lca-measurement}
+# Item-response probabilities for each class
+measurement_summary(fit)
+```
+
+```{r lca-diagnostics}
+# Average posterior probabilities — diagonal values near 1 = well-separated classes
+classification_diagnostics(fit)
+```
+
+### Model selection
+
+Use `compare_mixtures()` to fit K = 1 to 4 and compare fit indices. BIC is
+the most common criterion for determining the number of classes.
+
+```{r model-selection}
+sel <- compare_mixtures(X,
+                        k_range     = 1:4,
+                        measurement = "binary",
+                        n_init      = 5)
+
+# The best-fitting model and its full table
+sel$best_k
+sel$fit_table
+```
+
+### Latent Profile Analysis (LPA)
+
+For continuous indicators, switch `measurement` to `"continuous"`:
+
+```{r lpa-example}
+# Simulate continuous data from a 2-profile population
+set.seed(1)
+n1 <- 150; n2 <- 150
+X_cont <- rbind(
+  matrix(rnorm(n1 * 4, mean = c(2, 2, -2, -2), sd = 1), nrow = n1, byrow = TRUE),
+  matrix(rnorm(n2 * 4, mean = c(-2, -2, 2, 2), sd = 1), nrow = n2, byrow = TRUE)
+)
+
+fit_lpa <- fit_mixture(X_cont,
+                       n_components = 2,
+                       measurement  = "continuous",
+                       n_init       = 5,
+                       random_state = 1)
+print(fit_lpa)
+measurement_summary(fit_lpa)
+```
+
+### 3-step LCA with a covariate
+
+The 3-step approach first estimates the classes on the measurement model alone,
+then regresses class membership on external covariates — avoiding the parameter
+contamination that occurs in 1-step estimation. The `"ML"` correction adjusts
+for classification error.
+
+```{r covariate-example}
+# Covariate correlated with class membership
+set.seed(7)
+Z <- matrix(ifelse(classes == 1, rnorm(n, 1, 1),
+            ifelse(classes == 2, rnorm(n, -1, 1),
+                                  rnorm(n,  0, 1))),
+            ncol = 1)
+colnames(Z) <- "z1"
+
+fit_cov <- fit_mixture(X, Y = Z,
+                       n_components = 3,
+                       measurement  = "binary",
+                       structural   = "covariate",
+                       n_steps      = 3,
+                       correction   = "ML",
+                       n_init       = 5,
+                       random_state = 7)
+
+# Structural model: odds ratios with 95 % CIs (analytical SEs)
+summary(fit_cov)
+```
+
+```{r coef-example}
+# Odds ratios relative to Class 3 (the reference)
+coef(fit_cov, ref_class = 3)
+```
+
+```{r confint-example}
+# Confidence intervals for odds ratios
+confint(fit_cov, ref_class = 3)
+```
+
+### Hypothesis tests for covariates
+
+#### Analytical Wald test
+
+Fast, no resampling required — uses the observed information matrix.
+
+```{r wald-analytical}
+analytical_wald_test(fit_cov, term_name = "z1", ref_class = 3)
+```
+
+#### Bootstrap Wald omnibus test
+
+More robust in small samples or when classes overlap.
+
+```{r wald-bootstrap, eval = FALSE}
+boot <- bootstrap_covariates(fit_cov, X, Z, n_reps = 200, ref_class = 3)
+boot$p_values
+wald_omnibus_test(boot, term_name = "z1")
+confint(fit_cov, boot_results = boot, ref_class = 3)
+```
+
+### Bootstrap Likelihood Ratio Test (BLRT)
+
+Tests whether a K-class model fits significantly better than a (K−1)-class
+model, using a parametric bootstrap to approximate the null distribution.
+
+```{r blrt, eval = FALSE}
+result <- calc_blrt(X,
+                    k_small      = 2,
+                    k_large      = 3,
+                    measurement  = "binary",
+                    n_reps       = 100)
+result$p_value
+```
+
+## Function reference
+
+| Function | Description |
+|---|---|
+| `fit_mixture()` | Fit an LCA / LPA model (core function) |
+| `compare_mixtures()` | Fit models across a range of K and compare fit indices |
+| `print()` | Print a compact model summary |
+| `summary()` | Print structural model parameters (OR, CI, p-values) |
+| `measurement_summary()` | Print item-response probabilities or means per class |
+| `classification_diagnostics()` | Average posterior probability (AvePP) matrix |
+| `coef()` | Extract odds ratios from a covariate model |
+| `confint()` | Confidence intervals for odds ratios (analytical or bootstrap) |
+| `analytical_wald_test()` | Analytical Wald chi-squared test for a covariate |
+| `bootstrap_covariates()` | Bootstrap standard errors for covariate parameters |
+| `wald_omnibus_test()` | Bootstrap Wald omnibus test for a covariate |
+| `calc_blrt()` | Bootstrap Likelihood Ratio Test for class enumeration |
+
+## Supported model types
+
+### Measurement (`measurement =`)
+
+| String | Indicator type |
+|---|---|
+| `"binary"` / `"bernoulli"` | Binary (0/1) |
+| `"binary_nan"` / `"bernoulli_nan"` | Binary with missing data |
+| `"categorical"` / `"multinoulli"` | Ordinal / polytomous |
+| `"categorical_nan"` / `"multinoulli_nan"` | Ordinal with missing data |
+| `"continuous"` / `"gaussian_diag"` | Continuous (estimated variance) |
+| `"continuous_nan"` / `"gaussian_diag_nan"` | Continuous with missing data |
+| `"gaussian"` / `"gaussian_unit"` | Continuous (unit variance) |
+| Named list | Mixed model combining any of the above |
+
+### Structural (`structural =`)
+
+| String | Model |
+|---|---|
+| `"covariate"` | Multinomial logistic regression predicting class |
+| `"distal_continuous"` | Continuous distal outcome (class means) |
+| `"distal_continuous_regression"` | Continuous distal outcome moderated by a covariate |
+| `"distal_pooled"` | Categorical distal outcome, pooled regression |
+| `"distal_regression"` | Categorical distal outcome, class-specific regression |
+
+## Citation
+
+If you use unmixR in published research, please cite it as:
+
+```
+Valencia, P. (2025). unmixR: Latent Class and Profile Analysis in R.
+R package. https://github.com/pdvalencia/unmixR
+```
