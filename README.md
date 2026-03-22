@@ -162,7 +162,7 @@ For continuous indicators, switch `measurement` to `"continuous"`:
 ``` r
 # Simulate continuous data from a 2-profile population
 set.seed(1)
-n1 <- 150; n2 <- 150
+n1 <- 180; n2 <- 120
 X_cont <- rbind(
   matrix(rnorm(n1 * 4, mean = c(2, 2, -2, -2), sd = 1), nrow = n1, byrow = TRUE),
   matrix(rnorm(n2 * 4, mean = c(-2, -2, 2, 2), sd = 1), nrow = n2, byrow = TRUE)
@@ -179,14 +179,14 @@ print(fit_lpa)
 #> =========================================================
 #> Classes Estimated  : 2
 #> Estimation Method  : 1-step
-#> Converged          : TRUE (in 6 iterations)
+#> Converged          : TRUE (in 3 iterations)
 #> ---------------------------------------------------------
-#>   Log-Likelihood : -1939.80
+#>   Log-Likelihood : -1935.52
 #>   Rel. Entropy   : 1.0000
 #> ---------------------------------------------------------
 #> Class Weights (Sizes):
-#>   Class 1: 50.00%
-#>   Class 2: 50.00%
+#>   Class 1: 59.97%
+#>   Class 2: 40.03%
 #> =========================================================
 #> Type summary(model) for structural parameters or measurement_summary(model) for item parameters.
 measurement_summary(fit_lpa)
@@ -197,10 +197,10 @@ measurement_summary(fit_lpa)
 #> CONTINUOUS MEANS
 #> Indicator            | Class 1 | Class 2
 #> ---------------------------------------- 
-#> Item_1               |   1.949 |  -2.057
-#> Item_2               |   2.085 |  -2.101
-#> Item_3               |  -1.996 |   2.012
-#> Item_4               |  -1.991 |   1.915
+#> Item_1               |   1.920 |  -2.014
+#> Item_2               |   2.036 |  -2.076
+#> Item_3               |  -1.997 |   2.015
+#> Item_4               |  -2.025 |   1.942
 #> =========================================================
 ```
 
@@ -290,7 +290,8 @@ analytical_wald_test(fit_cov, term_name = "z1", ref_class = 3)
 
 #### Bootstrap Wald omnibus test
 
-More robust in small samples or when classes overlap.
+Experimental. Might be more robust in small samples or when classes
+overlap.
 
 ``` r
 boot <- bootstrap_covariates(fit_cov, X, Z, n_reps = 200, ref_class = 3)
@@ -392,5 +393,5 @@ result$p_value
 
 If you use mixtureEM in published research, please cite it as:
 
-    Valencia, P. D. (2025). mixtureEM: Latent Class and Profile Analysis in R.
+    Valencia, P. D. (2026). mixtureEM: Latent Class and Profile Analysis in R.
     R package. https://github.com/pdvalencia/mixtureEM

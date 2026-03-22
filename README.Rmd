@@ -101,7 +101,7 @@ For continuous indicators, switch `measurement` to `"continuous"`:
 ```{r lpa-example}
 # Simulate continuous data from a 2-profile population
 set.seed(1)
-n1 <- 150; n2 <- 150
+n1 <- 180; n2 <- 120
 X_cont <- rbind(
   matrix(rnorm(n1 * 4, mean = c(2, 2, -2, -2), sd = 1), nrow = n1, byrow = TRUE),
   matrix(rnorm(n2 * 4, mean = c(-2, -2, 2, 2), sd = 1), nrow = n2, byrow = TRUE)
@@ -167,7 +167,7 @@ analytical_wald_test(fit_cov, term_name = "z1", ref_class = 3)
 
 #### Bootstrap Wald omnibus test
 
-More robust in small samples or when classes overlap.
+Experimental. Might be more robust in small samples or when classes overlap.
 
 ```{r wald-bootstrap, eval=TRUE}
 boot <- bootstrap_covariates(fit_cov, X, Z, n_reps = 200, ref_class = 3)
@@ -237,6 +237,6 @@ result$p_value
 If you use mixtureEM in published research, please cite it as:
 
 ```
-Valencia, P. D. (2025). mixtureEM: Latent Class and Profile Analysis in R.
+Valencia, P. D. (2026). mixtureEM: Latent Class and Profile Analysis in R.
 R package. https://github.com/pdvalencia/mixtureEM
 ```
