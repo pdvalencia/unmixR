@@ -10,13 +10,15 @@
 #'
 #' @param object A fitted \code{mixture_model} object with a covariate
 #'   structural model (fitted with \code{structural = "covariate"}).
+#' @param parm A specification of which parameters are to be given confidence
+#'   intervals. Currently ignored (intervals are returned for all covariate parameters).
+#' @param level Numeric. The confidence level. Default is \code{0.95}.
 #' @param boot_results Optional. A list returned by
 #'   \code{\link{bootstrap_covariates}}. When provided, bootstrapped standard
 #'   errors are used. When \code{NULL} (default), analytical SEs derived from
 #'   the Hessian are used.
 #' @param ref_class Integer. The reference latent class. Odds ratios for all
 #'   other classes are expressed relative to this class. Default is \code{1}.
-#' @param level Numeric. The confidence level. Default is \code{0.95}.
 #' @param ... Currently unused. Present for S3 method compatibility.
 #'
 #' @return A named list with one data frame per predictor variable (including
@@ -43,7 +45,7 @@
 #' }
 #'
 #' @export
-confint.mixture_model <- function(object, boot_results = NULL, ref_class = 1, level = 0.95, ...) {
+confint.mixture_model <- function(object, parm = NULL, level = 0.95, boot_results = NULL, ref_class = 1, ...) {
   if (is.null(object$sm) || !inherits(object$sm, "covariate")) stop("No covariate model.")
 
   K <- object$n_components

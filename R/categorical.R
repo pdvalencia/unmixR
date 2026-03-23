@@ -3,6 +3,18 @@
 # ==============================================================================
 
 #' Constructor for Categorical models
+#'
+#' @description
+#' Sets up the initial state and class structure for categorical emission models
+#' (like Bernoulli or Multinoulli) before the EM algorithm runs.
+#'
+#' @param n_components Integer. The number of latent classes/components to estimate.
+#' @param type Character. The specific distribution type, usually "bernoulli".
+#' @param max_val Integer or NULL. The maximum category value (used for multinoulli).
+#' @param ... Additional arguments passed to the method.
+#'
+#' @return A list object of class \code{c(type, "emission")} containing the model state.
+#' @export
 categorical_model <- function(n_components, type = "bernoulli", max_val = NULL, ...) {
   state <- list(
     n_components = n_components,
@@ -18,7 +30,7 @@ categorical_model <- function(n_components, type = "bernoulli", max_val = NULL, 
 # ------------------------------------------------------------------------------
 
 #' @exportS3Method
-init_params.bernoulli <- function(model_state, X, resp, random_state = NULL) {
+init_params.bernoulli <- function(model_state, X, resp, random_state = NULL, ...) {
   if (!is.null(random_state)) set.seed(random_state)
   model_state$parameters$pis <- matrix(
     runif(model_state$n_components * ncol(X), 0.25, 0.75),
@@ -28,7 +40,7 @@ init_params.bernoulli <- function(model_state, X, resp, random_state = NULL) {
 }
 
 #' @exportS3Method
-m_step.bernoulli <- function(model_state, X, resp, weights = NULL, alpha = 1.0) {
+m_step.bernoulli <- function(model_state, X, resp, weights = NULL, alpha = 1.0, ...) {
   if (!is.null(weights)) {
     resp <- sweep(resp, 1, weights, "*")
     marginal_prob <- colSums(sweep(X, 1, weights, "*"), na.rm = TRUE) / sum(weights)
@@ -53,7 +65,7 @@ m_step.bernoulli <- function(model_state, X, resp, weights = NULL, alpha = 1.0) 
 }
 
 #' @exportS3Method
-log_likelihood.bernoulli <- function(model_state, X) {
+log_likelihood.bernoulli <- function(model_state, X, ...) {
   log_eps <- matrix(0, nrow = nrow(X), ncol = model_state$n_components)
   for (c in seq_len(model_state$n_components)) {
     pi_c <- model_state$parameters$pis[c, ]
@@ -67,7 +79,7 @@ log_likelihood.bernoulli <- function(model_state, X) {
 }
 
 #' @exportS3Method
-n_parameters.bernoulli <- function(model_state) {
+n_parameters.bernoulli <- function(model_state, ...) {
   return(length(model_state$parameters$pis))
 }
 
@@ -80,7 +92,7 @@ init_params.bernoulli_nan <- init_params.bernoulli
 n_parameters.bernoulli_nan <- n_parameters.bernoulli
 
 #' @exportS3Method
-m_step.bernoulli_nan <- function(model_state, X, resp, weights = NULL, alpha = 1.0) {
+m_step.bernoulli_nan <- function(model_state, X, resp, weights = NULL, alpha = 1.0, ...) {
   if (!is.null(weights)) {
     resp <- sweep(resp, 1, weights, "*")
   }
@@ -110,7 +122,7 @@ m_step.bernoulli_nan <- function(model_state, X, resp, weights = NULL, alpha = 1
 }
 
 #' @exportS3Method
-log_likelihood.bernoulli_nan <- function(model_state, X) {
+log_likelihood.bernoulli_nan <- function(model_state, X, ...) {
   log_eps <- matrix(0, nrow = nrow(X), ncol = model_state$n_components)
   for (c in seq_len(model_state$n_components)) {
     pi_c <- model_state$parameters$pis[c, ]
@@ -159,7 +171,7 @@ one_hot <- function(X, max_val) {
 }
 
 #' @exportS3Method
-init_params.multinoulli <- function(model_state, X, resp, random_state = NULL) {
+init_params.multinoulli <- function(model_state, X, resp, random_state = NULL, ...) {
   if (!is.null(random_state)) set.seed(random_state)
 
   # Only infer max_val from the data if the user didn't explicitly provide it
@@ -179,7 +191,7 @@ init_params.multinoulli <- function(model_state, X, resp, random_state = NULL) {
 }
 
 #' @exportS3Method
-m_step.multinoulli <- function(model_state, X, resp, weights = NULL, alpha = 1.0) {
+m_step.multinoulli <- function(model_state, X, resp, weights = NULL, alpha = 1.0, ...) {
   if (!is.null(weights)) {
     resp <- sweep(resp, 1, weights, "*")
   }
@@ -219,7 +231,7 @@ m_step.multinoulli <- function(model_state, X, resp, weights = NULL, alpha = 1.0
 }
 
 #' @exportS3Method
-log_likelihood.multinoulli <- function(model_state, X) {
+log_likelihood.multinoulli <- function(model_state, X, ...) {
   X_oh <- one_hot(X, model_state$max_val)
   log_eps <- matrix(0, nrow = nrow(X), ncol = model_state$n_components)
 
@@ -231,7 +243,7 @@ log_likelihood.multinoulli <- function(model_state, X) {
 }
 
 #' @exportS3Method
-n_parameters.multinoulli <- function(model_state) {
+n_parameters.multinoulli <- function(model_state, ...) {
   n_features <- ncol(model_state$parameters$pis) / model_state$max_val
   return(model_state$n_components * n_features * (model_state$max_val - 1))
 }

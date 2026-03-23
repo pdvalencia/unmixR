@@ -39,7 +39,7 @@ distal_pooled_model <- function(n_components, tol = 1e-4, max_iter = 500,
 
 #' @exportS3Method
 init_params.distal_pooled <- function(model_state, X, resp,
-                                      random_state = NULL) {
+                                      random_state = NULL, ...) {
   if (!is.null(random_state)) set.seed(random_state)
 
   Y <- .validate_pooled_Y(X[, 1], "distal_pooled init_params")
@@ -62,7 +62,7 @@ init_params.distal_pooled <- function(model_state, X, resp,
 }
 
 #' @exportS3Method
-m_step.distal_pooled <- function(model_state, X, resp, weights = NULL) {
+m_step.distal_pooled <- function(model_state, X, resp, weights = NULL, ...) {
   Y <- .validate_pooled_Y(X[, 1], "distal_pooled m_step")
   if (is.null(Y)) return(model_state)  # constant outcome — skip (Bug 4 fix)
 
@@ -154,7 +154,7 @@ m_step.distal_pooled <- function(model_state, X, resp, weights = NULL) {
 }
 
 #' @exportS3Method
-log_likelihood.distal_pooled <- function(model_state, X) {
+log_likelihood.distal_pooled <- function(model_state, X, ...) {
   Y <- .validate_pooled_Y(X[, 1], "distal_pooled log_likelihood")
   if (is.null(Y)) {
     # Constant outcome: contribute zero log-likelihood (uninformative)
@@ -190,6 +190,6 @@ log_likelihood.distal_pooled <- function(model_state, X) {
 }
 
 #' @exportS3Method
-n_parameters.distal_pooled <- function(model_state) {
+n_parameters.distal_pooled <- function(model_state, ...) {
   return(length(model_state$parameters$beta_pooled))
 }

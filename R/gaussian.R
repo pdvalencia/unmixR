@@ -3,6 +3,16 @@
 # ==============================================================================
 
 #' Constructor for Gaussian models
+#'
+#' @description
+#' Sets up the initial state and class structure for continuous emission models
+#' (like Gaussian with diagonal or unit variance).
+#'
+#' @param n_components Integer. The number of latent classes/components to estimate.
+#' @param type Character. The specific variance structure, e.g., "gaussian_diag" or "gaussian_unit".
+#'
+#' @return A list object containing the model state.
+#' @export
 gaussian_model <- function(n_components, type = "gaussian_unit") {
   state <- list(
     n_components = n_components,
@@ -17,7 +27,7 @@ gaussian_model <- function(n_components, type = "gaussian_unit") {
 # ------------------------------------------------------------------------------
 
 #' @exportS3Method
-init_params.gaussian_unit <- function(model_state, X, resp, random_state = NULL) {
+init_params.gaussian_unit <- function(model_state, X, resp, random_state = NULL, ...) {
   if (!is.null(random_state)) set.seed(random_state)
   idx <- sample.int(nrow(X), model_state$n_components)
   model_state$parameters$means <- X[idx, , drop = FALSE]
@@ -25,7 +35,7 @@ init_params.gaussian_unit <- function(model_state, X, resp, random_state = NULL)
 }
 
 #' @exportS3Method
-m_step.gaussian_unit <- function(model_state, X, resp, weights = NULL) {
+m_step.gaussian_unit <- function(model_state, X, resp, weights = NULL, ...) {
   if (!is.null(weights)) resp <- sweep(resp, 1, weights, "*")
 
   means <- t(resp) %*% X
@@ -35,7 +45,7 @@ m_step.gaussian_unit <- function(model_state, X, resp, weights = NULL) {
 }
 
 #' @exportS3Method
-log_likelihood.gaussian_unit <- function(model_state, X) {
+log_likelihood.gaussian_unit <- function(model_state, X, ...) {
   n <- nrow(X)
   log_eps <- matrix(0, nrow = n, ncol = model_state$n_components)
   for (c in seq_len(model_state$n_components)) {
@@ -47,7 +57,7 @@ log_likelihood.gaussian_unit <- function(model_state, X) {
 }
 
 #' @exportS3Method
-n_parameters.gaussian_unit <- function(model_state) {
+n_parameters.gaussian_unit <- function(model_state, ...) {
   return(length(model_state$parameters$means))
 }
 
@@ -56,14 +66,14 @@ n_parameters.gaussian_unit <- function(model_state) {
 # ------------------------------------------------------------------------------
 
 #' @exportS3Method
-init_params.gaussian_diag <- function(model_state, X, resp, random_state = NULL) {
+init_params.gaussian_diag <- function(model_state, X, resp, random_state = NULL, ...) {
   model_state <- init_params.gaussian_unit(model_state, X, resp, random_state)
   model_state$parameters$covariances <- matrix(1, nrow = model_state$n_components, ncol = ncol(X))
   return(model_state)
 }
 
 #' @exportS3Method
-m_step.gaussian_diag <- function(model_state, X, resp, weights = NULL) {
+m_step.gaussian_diag <- function(model_state, X, resp, weights = NULL, ...) {
   if (!is.null(weights)) resp <- sweep(resp, 1, weights, "*")
 
   # 1. Update Means
@@ -84,7 +94,7 @@ m_step.gaussian_diag <- function(model_state, X, resp, weights = NULL) {
 }
 
 #' @exportS3Method
-log_likelihood.gaussian_diag <- function(model_state, X) {
+log_likelihood.gaussian_diag <- function(model_state, X, ...) {
   n <- nrow(X)
   log_eps <- matrix(0, nrow = n, ncol = model_state$n_components)
   for (c in seq_len(model_state$n_components)) {
@@ -98,7 +108,7 @@ log_likelihood.gaussian_diag <- function(model_state, X) {
 }
 
 #' @exportS3Method
-n_parameters.gaussian_diag <- function(model_state) {
+n_parameters.gaussian_diag <- function(model_state, ...) {
   return(length(model_state$parameters$means) + length(model_state$parameters$covariances))
 }
 
@@ -112,7 +122,7 @@ init_params.gaussian_diag_nan <- init_params.gaussian_diag
 n_parameters.gaussian_diag_nan <- n_parameters.gaussian_diag
 
 #' @exportS3Method
-m_step.gaussian_diag_nan <- function(model_state, X, resp, weights = NULL) {
+m_step.gaussian_diag_nan <- function(model_state, X, resp, weights = NULL, ...) {
   if (!is.null(weights)) resp <- sweep(resp, 1, weights, "*")
 
   means <- matrix(0, nrow = model_state$n_components, ncol = ncol(X))
@@ -140,7 +150,7 @@ m_step.gaussian_diag_nan <- function(model_state, X, resp, weights = NULL) {
 }
 
 #' @exportS3Method
-log_likelihood.gaussian_diag_nan <- function(model_state, X) {
+log_likelihood.gaussian_diag_nan <- function(model_state, X, ...) {
   n <- nrow(X)
   log_eps <- matrix(0, nrow = n, ncol = model_state$n_components)
   for (c in seq_len(model_state$n_components)) {

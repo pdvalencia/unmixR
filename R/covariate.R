@@ -10,7 +10,7 @@ covariate_model <- function(n_components, tol = 1e-6, max_iter = 500, intercept 
 }
 
 #' @exportS3Method
-m_step.covariate <- function(model_state, X, resp, weights = NULL) {
+m_step.covariate <- function(model_state, X, resp, weights = NULL, ...) {
   X_mat <- if(model_state$intercept) cbind(1, as.matrix(X)) else as.matrix(X)
   K <- model_state$n_components
   D <- ncol(X_mat)
@@ -87,7 +87,7 @@ init_params.covariate <- function(model_state, X, resp, ...) {
 }
 
 #' @exportS3Method
-log_likelihood.covariate <- function(model_state, X) {
+log_likelihood.covariate <- function(model_state, X, ...) {
   # 1. Prepare Matrix
   X_mat <- if(model_state$intercept) cbind(1, as.matrix(X)) else as.matrix(X)
 
@@ -112,6 +112,6 @@ log_likelihood.covariate <- function(model_state, X) {
 }
 
 #' @exportS3Method
-n_parameters.covariate <- function(model_state) {
+n_parameters.covariate <- function(model_state, ...) {
   return((nrow(model_state$parameters$beta) - 1) * ncol(model_state$parameters$beta))
 }

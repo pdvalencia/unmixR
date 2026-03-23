@@ -59,6 +59,8 @@ build_emission <- function(descriptor, n_components = 2, ...) {
       return(do.call(distal_continuous_model, args_list))
     } else if (descriptor == "distal_continuous_regression") {
       return(do.call(distal_continuous_regression_model, args_list))
+    } else if (descriptor == "distal_continuous_pooled") {
+      return(do.call(distal_continuous_pooled_model, args_list))
     } else {
       stop(sprintf("Emission descriptor '%s' not recognized.", descriptor))
     }

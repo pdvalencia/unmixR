@@ -4,11 +4,23 @@
 \alias{confint.mixture_model}
 \title{Confidence Intervals for Odds Ratios in a Mixture Model}
 \usage{
-\method{confint}{mixture_model}(object, boot_results = NULL, ref_class = 1, level = 0.95, ...)
+\method{confint}{mixture_model}(
+  object,
+  parm = NULL,
+  level = 0.95,
+  boot_results = NULL,
+  ref_class = 1,
+  ...
+)
 }
 \arguments{
 \item{object}{A fitted \code{mixture_model} object with a covariate
 structural model (fitted with \code{structural = "covariate"}).}
+
+\item{parm}{A specification of which parameters are to be given confidence
+intervals. Currently ignored (intervals are returned for all covariate parameters).}
+
+\item{level}{Numeric. The confidence level. Default is \code{0.95}.}
 
 \item{boot_results}{Optional. A list returned by
 \code{\link{bootstrap_covariates}}. When provided, bootstrapped standard
@@ -17,8 +29,6 @@ the Hessian are used.}
 
 \item{ref_class}{Integer. The reference latent class. Odds ratios for all
 other classes are expressed relative to this class. Default is \code{1}.}
-
-\item{level}{Numeric. The confidence level. Default is \code{0.95}.}
 
 \item{...}{Currently unused. Present for S3 method compatibility.}
 }

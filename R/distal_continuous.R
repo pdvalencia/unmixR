@@ -18,7 +18,7 @@ init_params.distal_continuous <- function(model_state, X, resp, ...) {
 }
 
 #' @exportS3Method
-m_step.distal_continuous <- function(model_state, X, resp, weights = NULL) {
+m_step.distal_continuous <- function(model_state, X, resp, weights = NULL, ...) {
   Y <- as.numeric(X[, 1])
   valid <- !is.na(Y)
   Y_v <- Y[valid]
@@ -67,7 +67,7 @@ m_step.distal_continuous <- function(model_state, X, resp, weights = NULL) {
 }
 
 #' @exportS3Method
-log_likelihood.distal_continuous <- function(model_state, X) {
+log_likelihood.distal_continuous <- function(model_state, X, ...) {
   Y <- as.numeric(X[, 1])
   K <- model_state$n_components
   N <- length(Y)
@@ -86,6 +86,6 @@ log_likelihood.distal_continuous <- function(model_state, X) {
 }
 
 #' @exportS3Method
-n_parameters.distal_continuous <- function(model_state) {
+n_parameters.distal_continuous <- function(model_state, ...) {
   return(model_state$n_components * 2)
 }

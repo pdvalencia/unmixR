@@ -23,7 +23,7 @@ init_params.distal_continuous_regression <- function(model_state, X, resp, ...) 
 }
 
 #' @exportS3Method
-m_step.distal_continuous_regression <- function(model_state, X, resp, weights = NULL) {
+m_step.distal_continuous_regression <- function(model_state, X, resp, weights = NULL, ...) {
   Y <- as.numeric(X[, 1])
   Z_raw <- impute_covariates(X[, -1, drop = FALSE])
   Z <- cbind(1, Z_raw)
@@ -86,7 +86,7 @@ m_step.distal_continuous_regression <- function(model_state, X, resp, weights = 
 }
 
 #' @exportS3Method
-log_likelihood.distal_continuous_regression <- function(model_state, X) {
+log_likelihood.distal_continuous_regression <- function(model_state, X, ...) {
   Y <- as.numeric(X[, 1])
   Z_raw <- impute_covariates(X[, -1, drop = FALSE])
   Z <- cbind(1, Z_raw)
@@ -111,7 +111,7 @@ log_likelihood.distal_continuous_regression <- function(model_state, X) {
 }
 
 #' @exportS3Method
-n_parameters.distal_continuous_regression <- function(model_state) {
+n_parameters.distal_continuous_regression <- function(model_state, ...) {
   K <- model_state$n_components
   D <- ncol(model_state$parameters$betas)
   return((K * D) + K)

@@ -6,6 +6,15 @@
 \usage{
 gaussian_model(n_components, type = "gaussian_unit")
 }
+\arguments{
+\item{n_components}{Integer. The number of latent classes/components to estimate.}
+
+\item{type}{Character. The specific variance structure, e.g., "gaussian_diag" or "gaussian_unit".}
+}
+\value{
+A list object containing the model state.
+}
 \description{
-Constructor for Gaussian models
+Sets up the initial state and class structure for continuous emission models
+(like Gaussian with diagonal or unit variance).
 }

@@ -66,7 +66,11 @@ sort_model_classes <- function(model_state) {
           sm$parameters$covariances[new_order, , drop = FALSE]
       }
       if (!is.null(sm$parameters[["ses"]])) {
-        sm$parameters$ses <- sm$parameters$ses[new_order, , drop = FALSE]
+        if (inherits(sm, "distal_continuous_pooled")) {
+          sm$parameters$ses[1, 1:K] <- sm$parameters$ses[1, new_order]
+        } else {
+          sm$parameters$ses <- sm$parameters$ses[new_order, , drop = FALSE]
+        }
       }
       if (!is.null(sm$parameters[["betas"]])) {
         if (length(dim(sm$parameters$betas)) == 3) {
@@ -76,12 +80,16 @@ sort_model_classes <- function(model_state) {
         }
       }
       if (!is.null(sm$parameters[["beta_pooled"]])) {
-        # Guard: when beta_pooled is a degenerate 0x0 placeholder (produced by
-        # a constant-outcome distal_pooled model), there is nothing to reorder.
-        if (nrow(sm$parameters$beta_pooled) > 0 &&
-            ncol(sm$parameters$beta_pooled) >= K) {
-          sm$parameters$beta_pooled[, 1:K] <-
-            sm$parameters$beta_pooled[, new_order, drop = FALSE]
+        if (inherits(sm, "distal_continuous_pooled")) {
+          sm$parameters$beta_pooled[1, 1:K] <- sm$parameters$beta_pooled[1, new_order]
+        } else {
+          # Guard: when beta_pooled is a degenerate 0x0 placeholder (produced by
+          # a constant-outcome distal_pooled model), there is nothing to reorder.
+          if (nrow(sm$parameters$beta_pooled) > 0 &&
+              ncol(sm$parameters$beta_pooled) >= K) {
+            sm$parameters$beta_pooled[, 1:K] <-
+              sm$parameters$beta_pooled[, new_order, drop = FALSE]
+          }
         }
       }
       return(sm)
@@ -375,7 +383,7 @@ summary.mixture_model <- function(object, ref_class = NULL, ...) {
     # loops fire on a zero-dimension array and crash with "subscript out of
     # bounds".  seq_len(0) correctly returns integer(0), skipping the loops.
     if (M_minus_1 == 0) {
-      cat("  (Constant outcome — no parameters to display)\n")
+      cat("  (Constant outcome - no parameters to display)\n")
     } else {
       var_names <- c("Intercept", paste0("Z", seq_len(D_distal - 1)))
 
@@ -453,6 +461,46 @@ summary.mixture_model <- function(object, ref_class = NULL, ...) {
         z_val <- est / se
         p_val <- 2 * (1 - pnorm(abs(z_val)))
         cat(sprintf("  %-13s %7.3f  [%6.3f, %6.3f]   %7.3f\n",
+                    var_names[v], est, est - 1.96*se, est + 1.96*se, p_val))
+      }
+    }
+  }
+
+  # F. Continuous distal pooled
+  cont_pool_sub <- NULL
+  if (inherits(object$sm, "distal_continuous_pooled")) cont_pool_sub <- object$sm
+  if (inherits(object$sm, "nested") && "distal" %in% names(object$sm$models) &&
+      inherits(object$sm$models$distal, "distal_continuous_pooled"))
+    cont_pool_sub <- object$sm$models$distal
+
+  if (!is.null(cont_pool_sub) && !is.null(cont_pool_sub$parameters$beta_pooled)) {
+    cat("\nCONTINUOUS DISTAL POOLED REGRESSION (Main Effects)\n")
+    cat("---------------------------------------------------------\n")
+    theta <- as.vector(cont_pool_sub$parameters$beta_pooled)
+    ses   <- as.vector(cont_pool_sub$parameters$ses)
+    K_distal <- K
+    D_cov <- length(theta) - K_distal
+    var_names <- if (D_cov > 0) paste0("Z", 1:D_cov) else character(0)
+
+    cat("\n  Latent Class (Intercepts):\n")
+    cat("                 Estimate   [95% CI]        P-Value\n")
+    for (k in 1:K_distal) {
+      est <- theta[k]
+      se  <- ses[k]
+      z_val <- est / se
+      p_val <- 2 * (1 - pnorm(abs(z_val)))
+      cat(sprintf("    Class %d      %7.3f  [%6.3f, %6.3f]   %7.3f\n",
+                  k, est, est - 1.96*se, est + 1.96*se, p_val))
+    }
+
+    if (D_cov > 0) {
+      cat("\n  Covariates (Pooled Slopes):\n")
+      for (v in 1:D_cov) {
+        est <- theta[K_distal + v]
+        se  <- ses[K_distal + v]
+        z_val <- est / se
+        p_val <- 2 * (1 - pnorm(abs(z_val)))
+        cat(sprintf("    %-11s %7.3f  [%6.3f, %6.3f]   %7.3f\n",
                     var_names[v], est, est - 1.96*se, est + 1.96*se, p_val))
       }
     }
@@ -545,6 +593,8 @@ summary.mixture_model <- function(object, ref_class = NULL, ...) {
 #' summary(fit_cov)
 #'
 #' @export
+#' @importFrom stats complete.cases cov dnorm optim pchisq pnorm qnorm rbinom rnorm runif sd var
+#' @importFrom utils setTxtProgressBar txtProgressBar
 fit_mixture <- function(X, Y = NULL, n_components = 2,
                         measurement = "binary", structural = NULL,
                         n_steps = 1, correction = "none", n_init = 1,

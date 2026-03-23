@@ -6,6 +6,19 @@
 \usage{
 categorical_model(n_components, type = "bernoulli", max_val = NULL, ...)
 }
+\arguments{
+\item{n_components}{Integer. The number of latent classes/components to estimate.}
+
+\item{type}{Character. The specific distribution type, usually "bernoulli".}
+
+\item{max_val}{Integer or NULL. The maximum category value (used for multinoulli).}
+
+\item{...}{Additional arguments passed to the method.}
+}
+\value{
+A list object of class \code{c(type, "emission")} containing the model state.
+}
 \description{
-Constructor for Categorical models
+Sets up the initial state and class structure for categorical emission models
+(like Bernoulli or Multinoulli) before the EM algorithm runs.
 }

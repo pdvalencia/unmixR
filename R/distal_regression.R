@@ -47,7 +47,7 @@ distal_regression_model <- function(n_components, tol = 1e-4, max_iter = 100,
 
 #' @exportS3Method
 init_params.distal_regression <- function(model_state, X, resp,
-                                          random_state = NULL) {
+                                          random_state = NULL, ...) {
   if (!is.null(random_state)) set.seed(random_state)
 
   Y <- .validate_distal_Y(X[, 1], "distal_regression init_params")
@@ -72,7 +72,7 @@ init_params.distal_regression <- function(model_state, X, resp,
 }
 
 #' @exportS3Method
-m_step.distal_regression <- function(model_state, X, resp, weights = NULL) {
+m_step.distal_regression <- function(model_state, X, resp, weights = NULL, ...) {
   Y <- .validate_distal_Y(X[, 1], "distal_regression m_step")
   if (is.null(Y)) return(model_state)  # constant outcome — skip (Bug 4 fix)
 
@@ -173,7 +173,7 @@ m_step.distal_regression <- function(model_state, X, resp, weights = NULL) {
 }
 
 #' @exportS3Method
-log_likelihood.distal_regression <- function(model_state, X) {
+log_likelihood.distal_regression <- function(model_state, X, ...) {
   Y <- .validate_distal_Y(X[, 1], "distal_regression log_likelihood")
   if (is.null(Y)) {
     # Constant outcome: contribute zero log-likelihood (uninformative)
@@ -210,7 +210,7 @@ log_likelihood.distal_regression <- function(model_state, X) {
 }
 
 #' @exportS3Method
-n_parameters.distal_regression <- function(model_state) {
+n_parameters.distal_regression <- function(model_state, ...) {
   K <- model_state$n_components
   D <- dim(model_state$parameters$betas)[3]
   M <- model_state$max_val

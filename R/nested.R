@@ -3,7 +3,7 @@
 # ==============================================================================
 
 #' @exportS3Method
-init_params.nested <- function(model_state, X, resp, random_state = NULL) {
+init_params.nested <- function(model_state, X, resp, random_state = NULL, ...) {
   start_col <- 1
   for (name in names(model_state$models)) {
     n_cols <- model_state$columns_per_model[name]
@@ -33,7 +33,7 @@ m_step.nested <- function(model_state, X, resp, ...) {
 }
 
 #' @exportS3Method
-log_likelihood.nested <- function(model_state, X) {
+log_likelihood.nested <- function(model_state, X, ...) {
   n_samples <- nrow(X)
   log_eps <- matrix(0, nrow = n_samples, ncol = model_state$n_components)
 
@@ -51,7 +51,7 @@ log_likelihood.nested <- function(model_state, X) {
 }
 
 #' @exportS3Method
-n_parameters.nested <- function(model_state) {
+n_parameters.nested <- function(model_state, ...) {
   n <- 0
   for (name in names(model_state$models)) {
     n <- n + n_parameters(model_state$models[[name]])
