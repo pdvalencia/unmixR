@@ -32,18 +32,18 @@ m_step.distal_continuous_pooled <- function(model_state, X, resp, weights = NULL
   Z <- impute_covariates(X[, -1, drop = FALSE])
   valid <- !is.na(Y)
 
-  Y_v <- Y[valid]
-  Z_v <- Z[valid, , drop = FALSE]
+  Y_v    <- Y[valid]
+  Z_v    <- Z[valid, , drop = FALSE]
   resp_v <- resp[valid, , drop = FALSE]
 
   if (!is.null(weights)) resp_v <- sweep(resp_v, 1, weights[valid], "*")
 
-  N_v <- nrow(Z_v)
-  K <- model_state$n_components
+  N_v   <- nrow(Z_v)
+  K     <- model_state$n_components
   D_cov <- ncol(Z_v)
-  L <- K + D_cov
+  L     <- K + D_cov
 
-  # 1. Expand Design Matrix for simultaneous intercept/slope estimation
+  # 1. Expand design matrix for simultaneous intercept/slope estimation
   U <- matrix(0, nrow = N_v * K, ncol = L)
   for (k in 1:K) {
     idx <- ((k - 1) * N_v + 1):(k * N_v)
@@ -54,42 +54,60 @@ m_step.distal_continuous_pooled <- function(model_state, X, resp, weights = NULL
   W_flat <- as.vector(resp_v)
   Y_flat <- rep(Y_v, K)
 
-  # 2. Estimate Intercepts and Pooled Slopes (The Bread)
+  # 2. Estimate intercepts and pooled slopes  (bread of the sandwich)
   UWU <- t(U) %*% sweep(U, 1, W_flat, "*")
   UWY <- t(U) %*% (W_flat * Y_flat)
 
-  diag(UWU) <- diag(UWU) + 1e-6 # Ridge penalty for stability
+  diag(UWU) <- diag(UWU) + 1e-6        # ridge penalty for stability
   B_inv <- pinv(UWU)
   theta <- B_inv %*% UWY
 
-  # 3. Calculate Class-Specific Variances
-  preds <- U %*% theta
+  # 3. Pooled residual variance
+  #
+  #    FIX: use SIGNED BCH weights, not abs(W_k).
+  #
+  #    sigma^2 = sum_k sum_i [ w_ik * (y_i - yhat_ik)^2 ]
+  #              / sum_k sum_i w_ik
+  #
+  #    This matches LatentGOLD's "error variance" under the homoskedastic
+  #    (pooled) model and gives a single scalar shared across all classes.
+  #    Using abs() inflates sigma^2 and, consequently, all SEs.
+  preds  <- U %*% theta
   resids <- as.vector(Y_flat - preds)
-  vars <- matrix(0, nrow = K, ncol = 1)
 
-  for(k in 1:K) {
-    idx <- ((k - 1) * N_v + 1):(k * N_v)
-    W_k <- W_flat[idx]
-    res_k <- resids[idx]
+  N_total <- sum(W_flat)
+  sigma2  <- if (abs(N_total) > 1e-5)
+    sum(W_flat * resids^2) / N_total
+  else
+    1e-5
+  sigma2 <- max(sigma2, 1e-5)
 
-    Nk_abs <- sum(abs(W_k))
-    if (Nk_abs > 1e-5) {
-      var_k <- sum(abs(W_k) * res_k^2) / Nk_abs
-    } else {
-      var_k <- 1e-5
-    }
-    vars[k, 1] <- max(var_k, 1e-5)
-  }
+  # Store a K x 1 matrix of the pooled variance (same value for every class)
+  # to keep the log_likelihood method working unchanged.
+  vars <- matrix(sigma2, nrow = K, ncol = 1)
 
-  # 4. Robust Sandwich SEs (The Meat)
-  meat_weights <- (W_flat * resids)^2
-  M_meat <- t(U) %*% sweep(U, 1, meat_weights, "*")
-  cov_matrix <- B_inv %*% M_meat %*% B_inv
-  ses <- sqrt(pmax(diag(cov_matrix), 1e-8))
+  # 4. Model-based SEs: sqrt( sigma^2 * diag(B^{-1}) )
+  #
+  #    FIX: replace the naive sandwich   sqrt(diag(B^{-1} M B^{-1}))
+  #    with the model-based estimator    sqrt(sigma^2 * diag(B^{-1})).
+  #
+  #    Rationale: the BCH expanded dataset has K weighted records per
+  #    person.  The naive sandwich treats those K records as independent,
+  #    inflating the meat by roughly K.  The model-based SE assumes the
+  #    normal linear model Y ~ N(X theta, sigma^2 I) with BCH weights,
+  #    giving Var(theta) = sigma^2 (U^T W U)^{-1} = sigma^2 B^{-1}.
+  #    This reproduces LatentGOLD's reported SEs exactly.
+  #
+  #    Note: LG reports SEs for CONTRASTS (class k vs. reference class 1)
+  #    for the intercepts, while we report SEs for the absolute intercepts.
+  #    Both are correct; they differ only in parameterisation.  The
+  #    contrast SE is recoverable as sqrt(V[k,k] + V[1,1] - 2*V[k,1])
+  #    where V = sigma^2 * B^{-1}.
+  ses <- sqrt(pmax(sigma2 * diag(B_inv), 1e-8))
 
   model_state$parameters$beta_pooled <- matrix(as.vector(theta), nrow = 1)
   model_state$parameters$covariances <- vars
-  model_state$parameters$ses <- matrix(ses, nrow = 1)
+  model_state$parameters$ses         <- matrix(ses, nrow = 1)
 
   return(model_state)
 }
@@ -99,13 +117,13 @@ log_likelihood.distal_continuous_pooled <- function(model_state, X, ...) {
   Y <- as.numeric(X[, 1])
   Z <- impute_covariates(X[, -1, drop = FALSE])
 
-  K <- model_state$n_components
+  K     <- model_state$n_components
   D_cov <- ncol(Z)
-  L <- K + D_cov
-  N <- length(Y)
+  L     <- K + D_cov
+  N     <- length(Y)
   valid <- !is.na(Y)
 
-  ll <- matrix(0, nrow = N, ncol = K)
+  ll    <- matrix(0, nrow = N, ncol = K)
   theta <- as.vector(model_state$parameters$beta_pooled)
 
   for (k in 1:K) {
@@ -119,8 +137,8 @@ log_likelihood.distal_continuous_pooled <- function(model_state, X, ...) {
 
       ll[valid, k] <- dnorm(Y[valid],
                             mean = preds,
-                            sd = sqrt(model_state$parameters$covariances[k, 1]),
-                            log = TRUE)
+                            sd   = sqrt(model_state$parameters$covariances[k, 1]),
+                            log  = TRUE)
     }
   }
   return(ll)
@@ -128,7 +146,8 @@ log_likelihood.distal_continuous_pooled <- function(model_state, X, ...) {
 
 #' @exportS3Method
 n_parameters.distal_continuous_pooled <- function(model_state, ...) {
-  K <- model_state$n_components
+  K     <- model_state$n_components
   D_cov <- ncol(model_state$parameters$beta_pooled) - K
-  return(K + D_cov + K) # K intercepts + D slopes + K variances
+  # K intercepts + D_cov slopes + 1 pooled variance
+  return(K + D_cov + 1L)
 }

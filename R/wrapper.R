@@ -72,6 +72,34 @@ sort_model_classes <- function(model_state) {
           sm$parameters$ses <- sm$parameters$ses[new_order, , drop = FALSE]
         }
       }
+      if (!is.null(sm$parameters[["Sigma_mu"]])) {
+        sm$parameters$Sigma_mu <-
+          sm$parameters$Sigma_mu[new_order, new_order, drop = FALSE]
+      }
+      if (!is.null(sm$parameters[["cov_theta"]])) {
+        # cov_theta is L x L where the first K rows/cols are intercepts.
+        # Reorder only the intercept block; slope block stays unchanged.
+        K_ct  <- sm$n_components
+        L_ct  <- nrow(sm$parameters$cov_theta)
+        D_ct  <- L_ct - K_ct
+        idx   <- c(new_order, if (D_ct > 0) (K_ct + seq_len(D_ct)) else integer(0))
+        sm$parameters$cov_theta <-
+          sm$parameters$cov_theta[idx, idx, drop = FALSE]
+      }
+      # Reorder the robust-sandwich hessian for distal_pooled / distal_regression.
+      # This hessian is K x K (or larger) and is indexed by class in the
+      # pre-sort order.  After sort_model_classes reorders beta_pooled, the
+      # hessian must be permuted to match so that Sigma = pinv(-H) is aligned.
+      if (!is.null(sm$parameters[["hessian"]]) &&
+          inherits(sm, c("distal_pooled", "distal_regression"))) {
+        H_sm  <- sm$parameters$hessian
+        K_sm  <- sm$n_components
+        L_sm  <- nrow(H_sm)
+        D_sm  <- L_sm - K_sm
+        idx_h <- c(new_order,
+                   if (D_sm > 0) (K_sm + seq_len(D_sm)) else integer(0))
+        sm$parameters$hessian <- H_sm[idx_h, idx_h, drop = FALSE]
+      }
       if (!is.null(sm$parameters[["betas"]])) {
         if (length(dim(sm$parameters$betas)) == 3) {
           sm$parameters$betas <- sm$parameters$betas[new_order, , , drop = FALSE]
@@ -227,6 +255,106 @@ classification_diagnostics <- function(object) {
   invisible(ave_pp)
 }
 
+# ==============================================================================
+# Internal helpers for summary.mixture_model
+# ==============================================================================
+
+# Format p-values to publication conventions.
+# Values below .001 are shown as "< .001"; NaN/NA appear as a dash.
+.fmt_pval <- function(p) {
+  if (is.na(p) || is.nan(p)) return("       —")
+  if (p < 0.001)              return("  < .001")
+  sprintf("   %5.3f", p)
+}
+
+# Omnibus Wald test for equality of K means (continuous distal outcomes).
+#
+# When Sigma_mu (the full K x K sandwich variance-covariance matrix of the
+# means) is available, uses the full-covariance formulation:
+#   W = c^T V^{-1} c,  where c = R * mu,  V = R * Sigma_mu * R^T
+#   R = contrast matrix [class k vs class 1, k = 2..K]  (df = K-1)
+#
+# This matches LatentGOLD's robust Wald statistic (Bakk, Oberski & Vermunt,
+# 2014) and accounts for the cross-class covariance induced by BCH weights.
+#
+# Falls back to the diagonal (precision-weighted) approximation when
+# Sigma_mu is not stored (e.g. for non-BCH structural models).
+#
+# Returns a list with stat, df, and p.
+.wald_omnibus_means <- function(means, ses, K, Sigma_mu = NULL) {
+  if (K <= 1L) return(list(stat = NA_real_, df = 0L, p = NA_real_))
+  df <- K - 1L
+
+  if (!is.null(Sigma_mu) && all(is.finite(Sigma_mu))) {
+    # Full sandwich Wald: contrast matrix R (K-1 x K), class 2..K vs class 1
+    R     <- cbind(-1, diag(K - 1L))
+    V     <- R %*% Sigma_mu %*% t(R)
+    theta <- R %*% means
+    W     <- tryCatch(
+      as.numeric(t(theta) %*% solve(V) %*% theta),
+      error = function(e) NA_real_
+    )
+  } else {
+    # Fallback: diagonal precision-weighted approximation
+    prec   <- 1 / pmax(ses^2, 1e-15)
+    mu_bar <- sum(prec * means) / sum(prec)
+    W      <- sum(prec * (means - mu_bar)^2)
+  }
+
+  p <- if (is.na(W)) NA_real_ else pchisq(W, df = df, lower.tail = FALSE)
+  list(stat = W, df = df, p = p)
+}
+
+# Omnibus Wald test for equality of class effects in distal_pooled.
+# Tests H0: beta[m, k] = beta[m, ref] for all k != ref and all m.
+# df = (M - 1) * (K - 1).
+.wald_omnibus_pooled <- function(beta_mat, Hessian, K, D_cov, ref_class) {
+  M_minus_1 <- nrow(beta_mat)
+  L         <- K + D_cov
+  if (M_minus_1 == 0L || K <= 1L)
+    return(list(stat = NA_real_, df = 0L, p = NA_real_))
+
+  Sigma   <- pinv(-Hessian)
+  non_ref <- setdiff(seq_len(K), ref_class)
+  n_ctr   <- M_minus_1 * (K - 1L)
+  R       <- matrix(0, nrow = n_ctr, ncol = M_minus_1 * L)
+
+  row_i <- 1L
+  for (m in seq_len(M_minus_1)) {
+    for (k in non_ref) {
+      R[row_i, (m - 1L) * L + k]         <-  1
+      R[row_i, (m - 1L) * L + ref_class] <- -1
+      row_i <- row_i + 1L
+    }
+  }
+
+  # beta_mat is (M-1) x L; vectorise row-major to match Hessian block ordering
+  beta_vec <- as.vector(t(beta_mat))
+  r_vec    <- R %*% beta_vec
+  V        <- R %*% Sigma %*% t(R)
+  W        <- tryCatch(as.numeric(t(r_vec) %*% pinv(V) %*% r_vec),
+                       error = function(e) NA_real_)
+  p        <- if (is.na(W)) NA_real_ else pchisq(W, df = n_ctr, lower.tail = FALSE)
+  list(stat = W, df = n_ctr, p = p)
+}
+
+# Predicted outcome probabilities for one class in a distal_pooled model,
+# evaluated at covariates = 0 (i.e., the class intercept only).
+.pred_probs_pooled <- function(beta_mat, K, D_cov, k) {
+  L        <- K + D_cov
+  U_k      <- matrix(0, nrow = 1, ncol = L)
+  U_k[1, k] <- 1                                   # one-hot class indicator
+  as.vector(distal_forward(U_k, beta_mat))
+}
+
+# Predicted outcome probabilities for one class in a distal_regression model,
+# evaluated at covariates = 0 (i.e., using the intercept column only).
+.pred_probs_reg <- function(betas_k, D) {
+  U       <- matrix(0, nrow = 1, ncol = D)
+  U[1, 1] <- 1                                     # intercept; covariates at 0
+  as.vector(distal_forward(U, betas_k))
+}
+
 #' Summarise a Fitted Mixture Model
 #'
 #' @description
@@ -303,9 +431,10 @@ summary.mixture_model <- function(object, ref_class = NULL, ...) {
         se    <- sqrt(max(0, var_diff))
         z_val <- est / se
         p_val <- 2 * (1 - pnorm(abs(z_val)))
-        cat(sprintf("  %-15s %7.3f  [%6.3f, %6.3f]   %7.3f\n",
+        cat(sprintf("  %-15s %7.3f  [%6.3f, %6.3f]  %s\n",
                     var_names[v], exp(est),
-                    exp(est - 1.96 * se), exp(est + 1.96 * se), p_val))
+                    exp(est - 1.96 * se), exp(est + 1.96 * se),
+                    .fmt_pval(p_val)))
       }
     }
   }
@@ -318,44 +447,73 @@ summary.mixture_model <- function(object, ref_class = NULL, ...) {
     pooled_sub <- object$sm$models$distal
 
   if (!is.null(pooled_sub) && !is.null(pooled_sub$parameters$beta_pooled)) {
-    cat("\nPOOLED DISTAL REGRESSION (MAIN EFFECTS)\n")
-    cat(sprintf("Reference Class: %d\n", ref_class))
+    cat("\nCATEGORICAL DISTAL OUTCOME (POOLED SLOPES)\n")
     cat("---------------------------------------------------------\n")
 
-    beta_mat   <- pooled_sub$parameters$beta_pooled
-    M_minus_1  <- nrow(beta_mat)
-    K_distal   <- K
-    D_cov      <- ncol(beta_mat) - K_distal
-    Sigma      <- pinv(-pooled_sub$parameters$hessian)
-    var_names  <- if (D_cov > 0) paste0("Z", 1:D_cov) else character(0)
+    beta_mat  <- pooled_sub$parameters$beta_pooled
+    M_minus_1 <- nrow(beta_mat)
+    K_distal  <- K
+    D_cov     <- ncol(beta_mat) - K_distal
+    M         <- M_minus_1 + 1L
+    Sigma     <- pinv(-pooled_sub$parameters$hessian)
+    var_names <- if (D_cov > 0) paste0("Z", seq_len(D_cov)) else character(0)
 
-    for (m in 1:M_minus_1) {
-      cat(sprintf("\nOutcome Category %d (vs Category 1) ON\n", m + 1))
-      cat("                     OR       [95% CI]        P-Value\n")
-      cat("\n  Latent Class (Main Effect):\n")
-      for (c in setdiff(1:K_distal, ref_class)) {
-        est     <- beta_mat[m, c] - beta_mat[m, ref_class]
-        idx_c   <- (m - 1) * (K_distal + D_cov) + c
-        idx_ref <- (m - 1) * (K_distal + D_cov) + ref_class
-        var_diff <- Sigma[idx_c, idx_c] + Sigma[idx_ref, idx_ref] -
-          2 * Sigma[idx_c, idx_ref]
-        se    <- sqrt(max(0, var_diff))
-        z_val <- est / se
-        p_val <- 2 * (1 - pnorm(abs(z_val)))
-        cat(sprintf("    Class %d        %7.3f  [%6.3f, %6.3f]   %7.3f\n",
-                    c, exp(est), exp(est - 1.96*se), exp(est + 1.96*se), p_val))
+    if (M_minus_1 > 0L) {
+
+      # --- Omnibus test ---
+      omni <- .wald_omnibus_pooled(beta_mat, pooled_sub$parameters$hessian,
+                                   K_distal, D_cov, ref_class)
+      if (!is.na(omni$stat)) {
+        cat(sprintf(
+          "\nOmnibus test (class differences): Wald \u03c7\u00b2(%d) = %.2f, p%s\n",
+          omni$df, omni$stat, .fmt_pval(omni$p)))
       }
-      if (D_cov > 0) {
-        cat("\n  Covariates (Main Effect):\n")
-        for (v in 1:D_cov) {
-          est  <- beta_mat[m, K_distal + v]
-          idx  <- (m - 1) * (K_distal + D_cov) + K_distal + v
-          se   <- sqrt(max(0, Sigma[idx, idx]))
-          z_val <- est / se
-          p_val <- 2 * (1 - pnorm(abs(z_val)))
-          cat(sprintf("    %-13s %7.3f  [%6.3f, %6.3f]   %7.3f\n",
-                      var_names[v], exp(est),
-                      exp(est - 1.96*se), exp(est + 1.96*se), p_val))
+
+      # --- Predicted probabilities (primary display) ---
+      cov_note <- if (D_cov > 0) " (covariates held at zero)" else ""
+      cat(sprintf("\nPredicted Probabilities%s:\n", cov_note))
+      cat(sprintf("  %-12s", ""))
+      for (m in seq_len(M)) cat(sprintf(" Cat %-4d", m))
+      cat("\n")
+      for (k in seq_len(K_distal)) {
+        probs <- .pred_probs_pooled(beta_mat, K_distal, D_cov, k)
+        cat(sprintf("  Class %-6d", k))
+        for (m in seq_len(M)) cat(sprintf("  %6.3f ", probs[m]))
+        cat("\n")
+      }
+
+      # --- Pairwise OR table (secondary) ---
+      cat(sprintf("\nPairwise Odds Ratios (Reference: Class %d)\n", ref_class))
+      cat("                     OR       [95% CI]        P-Value\n")
+      for (m in seq_len(M_minus_1)) {
+        cat(sprintf("\nOutcome Category %d (vs Category 1) ON\n", m + 1L))
+        cat("  Latent Class:\n")
+        for (c in setdiff(seq_len(K_distal), ref_class)) {
+          est      <- beta_mat[m, c] - beta_mat[m, ref_class]
+          idx_c    <- (m - 1L) * (K_distal + D_cov) + c
+          idx_ref  <- (m - 1L) * (K_distal + D_cov) + ref_class
+          var_diff <- Sigma[idx_c, idx_c] + Sigma[idx_ref, idx_ref] -
+            2 * Sigma[idx_c, idx_ref]
+          se    <- sqrt(max(0, var_diff))
+          z_val <- if (se > 0) est / se else NA_real_
+          p_val <- if (!is.na(z_val)) 2 * (1 - pnorm(abs(z_val))) else NA_real_
+          cat(sprintf("    Class %d        %7.3f  [%6.3f, %6.3f]  %s\n",
+                      c, exp(est), exp(est - 1.96 * se), exp(est + 1.96 * se),
+                      .fmt_pval(p_val)))
+        }
+        if (D_cov > 0) {
+          cat("  Covariates (Pooled Slope):\n")
+          for (v in seq_len(D_cov)) {
+            est   <- beta_mat[m, K_distal + v]
+            idx   <- (m - 1L) * (K_distal + D_cov) + K_distal + v
+            se    <- sqrt(max(0, Sigma[idx, idx]))
+            z_val <- if (se > 0) est / se else NA_real_
+            p_val <- if (!is.na(z_val)) 2 * (1 - pnorm(abs(z_val))) else NA_real_
+            cat(sprintf("    %-13s %7.3f  [%6.3f, %6.3f]  %s\n",
+                        var_names[v], exp(est),
+                        exp(est - 1.96 * se), exp(est + 1.96 * se),
+                        .fmt_pval(p_val)))
+          }
         }
       }
     }
@@ -369,45 +527,58 @@ summary.mixture_model <- function(object, ref_class = NULL, ...) {
     distal_sub <- object$sm$models$distal
 
   if (!is.null(distal_sub) && !is.null(distal_sub$parameters$betas)) {
-    cat("\nSIMULTANEOUS DISTAL REGRESSION (MODERATED BY CLASS)\n")
+    cat("\nCATEGORICAL DISTAL OUTCOME (CLASS-SPECIFIC SLOPES)\n")
     cat("---------------------------------------------------------\n")
 
     distal_betas <- distal_sub$parameters$betas
     K_distal     <- dim(distal_betas)[1]
     M_minus_1    <- dim(distal_betas)[2]
     D_distal     <- dim(distal_betas)[3]
+    M            <- M_minus_1 + 1L
 
-    # When the outcome is constant (M=1), init_params stores a
-    # degenerate array with dim c(K, 0, 0), so M_minus_1 = D_distal = 0.
-    # In R, 1:0 evaluates to c(1, 0) — NOT an empty sequence — so the inner
-    # loops fire on a zero-dimension array and crash with "subscript out of
-    # bounds".  seq_len(0) correctly returns integer(0), skipping the loops.
-    if (M_minus_1 == 0) {
-      cat("  (Constant outcome - no parameters to display)\n")
+    if (M_minus_1 == 0L) {
+      cat("  (Constant outcome — no parameters to display)\n")
     } else {
-      var_names <- c("Intercept", paste0("Z", seq_len(D_distal - 1)))
+      var_names <- c("Intercept", paste0("Z", seq_len(D_distal - 1L)))
+      cov_note  <- if (D_distal > 1L) " (covariates held at zero)" else ""
 
+      # --- Predicted probabilities (primary display) ---
+      cat(sprintf("\nPredicted Probabilities%s:\n", cov_note))
+      cat(sprintf("  %-12s", ""))
+      for (m in seq_len(M)) cat(sprintf(" Cat %-4d", m))
+      cat("\n")
+      for (k in seq_len(K_distal)) {
+        betas_k <- matrix(distal_betas[k, , ], nrow = M_minus_1, ncol = D_distal)
+        probs   <- .pred_probs_reg(betas_k, D_distal)
+        cat(sprintf("  Class %-6d", k))
+        for (m in seq_len(M)) cat(sprintf("  %6.3f ", probs[m]))
+        cat("\n")
+      }
+
+      # --- Class-specific OR tables (secondary) ---
+      cat("\nClass-Specific Estimates\n")
+      cat("                     OR       [95% CI]        P-Value\n")
       for (k in seq_len(K_distal)) {
         cat(sprintf("\nClass %d:\n", k))
-        cat("                     OR       [95% CI]        P-Value\n")
-        if (!is.null(distal_sub$parameters$hessians) &&
-            length(distal_sub$parameters$hessians) >= k) {
-          Sigma <- pinv(-distal_sub$parameters$hessians[[k]])
-        } else {
-          Sigma <- matrix(0, M_minus_1 * D_distal, M_minus_1 * D_distal)
-        }
+        Sigma <- if (!is.null(distal_sub$parameters$hessians) &&
+                     length(distal_sub$parameters$hessians) >= k)
+          pinv(-distal_sub$parameters$hessians[[k]])
+        else
+          matrix(0, M_minus_1 * D_distal, M_minus_1 * D_distal)
+
         for (m in seq_len(M_minus_1)) {
-          cat(sprintf("  Outcome Category %d (vs Category 1) ON\n", m + 1))
+          cat(sprintf("  Outcome Category %d (vs Category 1) ON\n", m + 1L))
           for (v in seq_len(D_distal)) {
-            est  <- distal_betas[k, m, v]
-            idx  <- (m - 1) * D_distal + v
-            se   <- sqrt(max(0, Sigma[idx, idx]))
+            est   <- distal_betas[k, m, v]
+            idx   <- (m - 1L) * D_distal + v
+            se    <- sqrt(max(0, Sigma[idx, idx]))
+            z_val <- if (se > 0) est / se else NA_real_
+            p_val <- if (!is.na(z_val)) 2 * (1 - pnorm(abs(z_val))) else NA_real_
             if (se > 0) {
-              z_val <- est / se
-              p_val <- 2 * (1 - pnorm(abs(z_val)))
-              cat(sprintf("    %-13s %7.3f  [%6.3f, %6.3f]   %7.3f\n",
+              cat(sprintf("    %-13s %7.3f  [%6.3f, %6.3f]  %s\n",
                           var_names[v], exp(est),
-                          exp(est - 1.96*se), exp(est + 1.96*se), p_val))
+                          exp(est - 1.96 * se), exp(est + 1.96 * se),
+                          .fmt_pval(p_val)))
             } else {
               cat(sprintf("    %-13s %7.3f  [   N/A,    N/A]       N/A\n",
                           var_names[v], exp(est)))
@@ -428,10 +599,23 @@ summary.mixture_model <- function(object, ref_class = NULL, ...) {
   if (!is.null(cont_sub) && !is.null(cont_sub$parameters$means)) {
     cat("\nCONTINUOUS DISTAL OUTCOME (MEANS)\n")
     cat("---------------------------------------------------------\n")
-    cat("                 Mean       [95% CI]        SE\n")
-    for (k in 1:K) {
-      mu <- cont_sub$parameters$means[k]
-      se <- cont_sub$parameters$ses[k]
+
+    means    <- as.vector(cont_sub$parameters$means)
+    ses      <- as.vector(cont_sub$parameters$ses)
+    Sigma_mu <- cont_sub$parameters$Sigma_mu   # NULL for non-BCH models
+
+    # Omnibus Wald test for equality of class means
+    omni <- .wald_omnibus_means(means, ses, K, Sigma_mu = Sigma_mu)
+    if (!is.na(omni$stat)) {
+      cat(sprintf(
+        "\nOmnibus test (class differences): Wald \u03c7\u00b2(%d) = %.2f, p%s\n",
+        omni$df, omni$stat, .fmt_pval(omni$p)))
+    }
+
+    cat("\n                 Mean       [95% CI]        SE\n")
+    for (k in seq_len(K)) {
+      mu <- means[k]
+      se <- ses[k]
       cat(sprintf("  Class %d      %7.3f  [%6.3f, %6.3f]   %7.3f\n",
                   k, mu, mu - 1.96 * se, mu + 1.96 * se, se))
     }
@@ -447,21 +631,68 @@ summary.mixture_model <- function(object, ref_class = NULL, ...) {
   if (!is.null(cont_reg_sub) && !is.null(cont_reg_sub$parameters$betas)) {
     cat("\nCONTINUOUS DISTAL REGRESSION (Y ~ Z * Class)\n")
     cat("---------------------------------------------------------\n")
+
     betas     <- cont_reg_sub$parameters$betas
     ses       <- cont_reg_sub$parameters$ses
     D         <- ncol(betas)
     var_names <- if (!is.null(colnames(betas))) colnames(betas) else
-      c("Intercept", paste0("Z", 1:(D - 1)))
-    for (k in 1:K) {
-      cat(sprintf("\nClass %d:\n", k))
+      c("Intercept", paste0("Z", seq_len(D - 1L)))
+
+    # Omnibus Wald test on class intercepts (class-specific means at Z = 0).
+    # Uses the model-based SE for each intercept (sigma^2 * B_inv_k[1,1]),
+    # assuming classes are independent — matching LatentGOLD's Wald(=) test.
+    intercepts <- betas[, 1L]
+    int_ses    <- ses[, 1L]   # already model-based if fitted with BCH v2
+    prec_int   <- 1 / pmax(int_ses^2, 1e-15)
+    mu_bar_int <- sum(prec_int * intercepts) / sum(prec_int)
+    W_stat_int <- sum(prec_int * (intercepts - mu_bar_int)^2)
+    omni <- list(stat = W_stat_int, df = K - 1L,
+                 p = pchisq(W_stat_int, df = K - 1L, lower.tail = FALSE))
+    if (!is.na(omni$stat)) {
+      cov_note <- if (D > 1L) " (at covariate zero)" else ""
+      cat(sprintf(
+        "\nOmnibus test (class differences%s): Wald \u03c7\u00b2(%d) = %.2f, p%s\n",
+        cov_note, omni$df, omni$stat, .fmt_pval(omni$p)))
+    }
+
+    cat("\n")
+    for (k in seq_len(K)) {
+      cat(sprintf("Class %d:\n", k))
       cat("                 Estimate   [95% CI]        P-Value\n")
-      for (v in 1:D) {
+      for (v in seq_len(D)) {
         est   <- betas[k, v]
         se    <- ses[k, v]
-        z_val <- est / se
-        p_val <- 2 * (1 - pnorm(abs(z_val)))
-        cat(sprintf("  %-13s %7.3f  [%6.3f, %6.3f]   %7.3f\n",
-                    var_names[v], est, est - 1.96*se, est + 1.96*se, p_val))
+        z_val <- if (se > 0) est / se else NA_real_
+        p_val <- if (!is.na(z_val)) 2 * (1 - pnorm(abs(z_val))) else NA_real_
+        cat(sprintf("  %-13s %7.3f  [%6.3f, %6.3f]  %s\n",
+                    var_names[v], est, est - 1.96 * se, est + 1.96 * se,
+                    .fmt_pval(p_val)))
+      }
+      cat("\n")
+    }
+
+    # ── Per-covariate Wald(=) tests: H0: slope_k equal across all classes ──
+    # Uses the diagonal independence approximation (separate per-class
+    # regressions), matching LatentGOLD's Wald(=) column.
+    # Contrast matrix R = [-1 | I_{K-1}], df = K-1.
+    if (K > 1L && D > 1L) {
+      cat("---------------------------------------------------------\n")
+      cat("Wald tests (equality of slopes across classes):\n")
+      cat(sprintf("  %-13s   Wald(%s)%s  P-Value\n",
+                  "", paste0("\u03c7\u00b2(", K - 1L, ")"), ""))
+      R_eq <- cbind(-1, diag(K - 1L))
+      for (v in 2L:D) {
+        theta_v <- betas[, v]
+        var_v   <- ses[, v]^2
+        V_c     <- R_eq %*% diag(var_v) %*% t(R_eq)
+        th_c    <- R_eq %*% theta_v
+        W_v     <- tryCatch(
+          as.numeric(t(th_c) %*% solve(V_c) %*% th_c),
+          error = function(e) NA_real_)
+        p_v     <- if (!is.na(W_v))
+          pchisq(W_v, df = K - 1L, lower.tail = FALSE) else NA_real_
+        cat(sprintf("  %-13s   %8.2f          %s\n",
+                    var_names[v], W_v, .fmt_pval(p_v)))
       }
     }
   }
@@ -476,32 +707,73 @@ summary.mixture_model <- function(object, ref_class = NULL, ...) {
   if (!is.null(cont_pool_sub) && !is.null(cont_pool_sub$parameters$beta_pooled)) {
     cat("\nCONTINUOUS DISTAL POOLED REGRESSION (Main Effects)\n")
     cat("---------------------------------------------------------\n")
-    theta <- as.vector(cont_pool_sub$parameters$beta_pooled)
-    ses   <- as.vector(cont_pool_sub$parameters$ses)
-    K_distal <- K
-    D_cov <- length(theta) - K_distal
-    var_names <- if (D_cov > 0) paste0("Z", 1:D_cov) else character(0)
+
+    theta     <- as.vector(cont_pool_sub$parameters$beta_pooled)
+    ses       <- as.vector(cont_pool_sub$parameters$ses)
+    K_distal  <- K
+    D_cov     <- length(theta) - K_distal
+    # Use stored column names when available; fall back to Z1, Z2, ...
+    stored_names <- colnames(cont_pool_sub$parameters$beta_pooled)
+    var_names <- if (!is.null(stored_names) && length(stored_names) > K_distal)
+      stored_names[(K_distal + 1L):length(stored_names)]
+    else if (D_cov > 0) paste0("Z", seq_len(D_cov))
+    else character(0)
+
+    # Omnibus Wald test on class intercepts
+    # When cov_theta is available (BCH step stored it), use the full
+    # model-based contrast Wald: H0: int_k = int_1 for all k != 1.
+    # This matches LatentGOLD's omnibus test and accounts for the
+    # covariance between intercept estimates.
+    cov_theta  <- cont_pool_sub$parameters$cov_theta
+    intercepts <- theta[seq_len(K_distal)]
+    int_ses    <- ses[seq_len(K_distal)]
+
+    if (!is.null(cov_theta) && all(is.finite(cov_theta))) {
+      cov_int   <- cov_theta[seq_len(K_distal), seq_len(K_distal)]
+      R_int     <- cbind(-1, diag(K_distal - 1L))
+      V_contr   <- R_int %*% cov_int %*% t(R_int)
+      theta_c   <- R_int %*% intercepts
+      W_stat    <- tryCatch(
+        as.numeric(t(theta_c) %*% solve(V_contr) %*% theta_c),
+        error = function(e) NA_real_
+      )
+      omni <- list(stat = W_stat, df = K_distal - 1L,
+                   p = if (is.na(W_stat)) NA_real_
+                   else pchisq(W_stat, df = K_distal - 1L, lower.tail = FALSE))
+    } else {
+      omni <- .wald_omnibus_means(intercepts, int_ses, K_distal)
+    }
+
+    if (!is.na(omni$stat)) {
+      cov_note <- if (D_cov > 0) " (at covariate zero)" else ""
+      cat(sprintf(
+        "\nOmnibus test (class differences%s): Wald \u03c7\u00b2(%d) = %.2f, p%s\n",
+        cov_note, omni$df, omni$stat, .fmt_pval(omni$p)))
+    }
 
     cat("\n  Latent Class (Intercepts):\n")
     cat("                 Estimate   [95% CI]        P-Value\n")
-    for (k in 1:K_distal) {
-      est <- theta[k]
-      se  <- ses[k]
-      z_val <- est / se
-      p_val <- 2 * (1 - pnorm(abs(z_val)))
-      cat(sprintf("    Class %d      %7.3f  [%6.3f, %6.3f]   %7.3f\n",
-                  k, est, est - 1.96*se, est + 1.96*se, p_val))
+    for (k in seq_len(K_distal)) {
+      est   <- theta[k]
+      se    <- ses[k]
+      z_val <- if (se > 0) est / se else NA_real_
+      p_val <- if (!is.na(z_val)) 2 * (1 - pnorm(abs(z_val))) else NA_real_
+      cat(sprintf("    Class %d      %7.3f  [%6.3f, %6.3f]  %s\n",
+                  k, est, est - 1.96 * se, est + 1.96 * se,
+                  .fmt_pval(p_val)))
     }
 
     if (D_cov > 0) {
       cat("\n  Covariates (Pooled Slopes):\n")
-      for (v in 1:D_cov) {
-        est <- theta[K_distal + v]
-        se  <- ses[K_distal + v]
-        z_val <- est / se
-        p_val <- 2 * (1 - pnorm(abs(z_val)))
-        cat(sprintf("    %-11s %7.3f  [%6.3f, %6.3f]   %7.3f\n",
-                    var_names[v], est, est - 1.96*se, est + 1.96*se, p_val))
+      cat("                 Estimate   [95% CI]        P-Value\n")
+      for (v in seq_len(D_cov)) {
+        est   <- theta[K_distal + v]
+        se    <- ses[K_distal + v]
+        z_val <- if (se > 0) est / se else NA_real_
+        p_val <- if (!is.na(z_val)) 2 * (1 - pnorm(abs(z_val))) else NA_real_
+        cat(sprintf("    %-11s %7.3f  [%6.3f, %6.3f]  %s\n",
+                    var_names[v], est, est - 1.96 * se, est + 1.96 * se,
+                    .fmt_pval(p_val)))
       }
     }
   }
@@ -599,10 +871,15 @@ fit_mixture <- function(X, Y = NULL, n_components = 2,
                         measurement = "binary", structural = NULL,
                         n_steps = 1, correction = "none", n_init = 1,
                         max_iter = 1000, random_state = NULL,
-                        order_by_size = TRUE, weights = NULL, ...) {
+                        order_by_size = TRUE, weights = NULL,
+                        refine = TRUE, ...) {
 
   if (is.data.frame(X)) X <- as.matrix(X)
-  if (!is.null(Y) && is.data.frame(Y)) Y <- as.matrix(Y)
+  # Convert Y through prepare_covariates() so that:
+  #   - numeric columns are passed through unchanged
+  #   - factor / character columns are dummy-coded (first level = reference)
+  #   - column names are always preserved for display in summary()
+  if (!is.null(Y)) Y <- prepare_covariates(Y)
 
   n_samples <- nrow(X)
 
@@ -691,10 +968,12 @@ fit_mixture <- function(X, Y = NULL, n_components = 2,
   class(model_state) <- "mixture_model"
 
   if (n_steps == 1) {
-    model_state <- fit_em(model_state, X, Y, n_init, max_iter, random_state)
+    model_state <- fit_em(model_state, X, Y, n_init, max_iter, random_state,
+                          refine = refine)
 
   } else if (n_steps == 2) {
-    model_state <- fit_em(model_state, X, NULL, n_init, max_iter, random_state)
+    model_state <- fit_em(model_state, X, NULL, n_init, max_iter, random_state,
+                          refine = refine)
     if (!is.null(Y) && !is.null(model_state$sm)) {
       resp <- exp(model_state$log_resp)
       model_state$sm <- init_params(model_state$sm, Y, resp)
@@ -702,7 +981,8 @@ fit_mixture <- function(X, Y = NULL, n_components = 2,
     }
 
   } else if (n_steps == 3) {
-    model_state <- fit_em(model_state, X, NULL, n_init, max_iter, random_state)
+    model_state <- fit_em(model_state, X, NULL, n_init, max_iter, random_state,
+                          refine = refine)
 
     # Step 1 metrics (measurement model only)
     n_params_s1  <- n_parameters(model_state$mm) + (model_state$n_components - 1)
@@ -748,6 +1028,34 @@ fit_mixture <- function(X, Y = NULL, n_components = 2,
   if (!is.null(colnames(X)) && !is.null(model_state$mm$parameters$pis) &&
       ncol(model_state$mm$parameters$pis) == ncol(X))
     colnames(model_state$mm$parameters$pis) <- colnames(X)
+
+  # Attach column names to betas for distal_continuous_regression.
+  if (!is.null(Y) && !is.null(model_state$sm) &&
+      inherits(model_state$sm, "distal_continuous_regression") &&
+      !is.null(model_state$sm$parameters$betas)) {
+    K_br    <- model_state$n_components
+    y_names <- if (!is.null(colnames(Y))) colnames(Y) else
+      paste0("V", seq_len(ncol(Y)))
+    cov_names_br <- if (ncol(Y) > 1L) y_names[-1L] else character(0L)
+    br_names     <- c("Intercept", cov_names_br)
+    if (length(br_names) == ncol(model_state$sm$parameters$betas))
+      colnames(model_state$sm$parameters$betas) <- br_names
+  }
+
+  # Attach column names to beta_pooled for distal_continuous_pooled so that
+  # summary() displays real variable names instead of Z1, Z2, etc.
+  if (!is.null(Y) && !is.null(model_state$sm) &&
+      inherits(model_state$sm, "distal_continuous_pooled") &&
+      !is.null(model_state$sm$parameters$beta_pooled)) {
+    K_bp    <- model_state$n_components
+    y_names <- if (!is.null(colnames(Y))) colnames(Y) else
+      paste0("V", seq_len(ncol(Y)))
+    # First column of Y is the outcome; remaining are covariates
+    cov_names_bp <- if (ncol(Y) > 1L) y_names[-1L] else character(0L)
+    bp_names     <- c(paste0("Class_", seq_len(K_bp)), cov_names_bp)
+    if (length(bp_names) == ncol(model_state$sm$parameters$beta_pooled))
+      colnames(model_state$sm$parameters$beta_pooled) <- bp_names
+  }
 
   # Attach covariate names to beta only when the SM is initialized (Bug 1 fix:
   # guard against NULL beta after correction="none" before the else branch above

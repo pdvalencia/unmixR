@@ -32,19 +32,30 @@ m_step.covariate <- function(model_state, X, resp, weights = NULL, ...) {
   nll_func <- function(pars) {
     B <- rbind(matrix(pars, K-1, D, byrow=TRUE), 0)
     logits <- X_aug %*% t(B)
-    logits <- pmax(pmin(logits, 50), -50) # Clamp
+    logits <- pmax(pmin(logits, 50), -50)
     max_l <- apply(logits, 1, max)
     prob <- exp(logits - max_l) / rowSums(exp(logits - max_l))
-
-    # Minimize negative log-likelihood on augmented data
-    # w_aug is length (n+K); resp_aug and log(prob) are (n+K)×K matrices.
-    # Multiplying w_aug * matrix recycles w_aug column-by-column, which is wrong.
-    # rowSums() collapses the class dimension first, giving a length-(n+K) vector,
-    # so w_aug * rowSums(...) is a plain same-length vector multiply — no recycling.
     -sum(w_aug * rowSums(resp_aug * log(prob + 1e-15)))
   }
 
-  fit <- optim(par = rep(0, (K-1)*D), fn = nll_func, method = "BFGS")
+  # Analytical gradient of nll_func wrt pars.
+  # For multinomial logistic regression:
+  #   ∂nll/∂B[k,d] = Σ_i w_i (prob[i,k] - resp[i,k]) * X[i,d]  for k < K
+  # Vectorised: grad[k, :] = t(X_aug) %*% (w_aug * (prob[,k] - resp_aug[,k]))
+  nll_grad <- function(pars) {
+    B <- rbind(matrix(pars, K-1, D, byrow=TRUE), 0)
+    logits <- X_aug %*% t(B)
+    logits <- pmax(pmin(logits, 50), -50)
+    max_l <- apply(logits, 1, max)
+    prob <- exp(logits - max_l) / rowSums(exp(logits - max_l))
+    # residual: (prob - resp_aug) weighted by w_aug, for free classes k = 1..K-1
+    resid <- sweep(prob[, seq_len(K-1), drop=FALSE] -
+                     resp_aug[, seq_len(K-1), drop=FALSE], 1, w_aug, "*")
+    as.vector(t(X_aug) %*% resid)   # D × (K-1), flattened row-major
+  }
+
+  fit <- optim(par = rep(0, (K-1)*D), fn = nll_func, gr = nll_grad,
+               method = "BFGS")
   beta_final <- rbind(matrix(fit$par, K-1, D, byrow=TRUE), 0)
 
   # ============================================================================

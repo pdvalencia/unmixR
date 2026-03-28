@@ -17,6 +17,7 @@ fit_mixture(
   random_state = NULL,
   order_by_size = TRUE,
   weights = NULL,
+  refine = TRUE,
   ...
 )
 }

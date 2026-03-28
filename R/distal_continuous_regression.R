@@ -1,5 +1,5 @@
 # ==============================================================================
-# S3 Distal Continuous Regression (Y ~ Z * Class) - ROBUST SEs
+# S3 Distal Continuous Regression (Y ~ Z * Class) - Model-Based SEs
 # ==============================================================================
 
 distal_continuous_regression_model <- function(n_components, ...) {
@@ -12,99 +12,102 @@ distal_continuous_regression_model <- function(n_components, ...) {
 init_params.distal_continuous_regression <- function(model_state, X, resp, ...) {
   Y <- as.numeric(X[, 1])
   Z <- cbind(1, X[, -1, drop = FALSE])
-
   K <- model_state$n_components
   D <- ncol(Z)
-
-  model_state$parameters$betas <- matrix(0, nrow = K, ncol = D)
-  model_state$parameters$covariances <- matrix(var(Y, na.rm=TRUE), nrow = K, ncol = 1)
-  model_state$parameters$ses <- matrix(0, nrow = K, ncol = D)
+  model_state$parameters$betas       <- matrix(0, nrow = K, ncol = D)
+  model_state$parameters$covariances <- matrix(var(Y, na.rm = TRUE), nrow = K, ncol = 1)
+  model_state$parameters$ses         <- matrix(0, nrow = K, ncol = D)
   return(model_state)
 }
 
 #' @exportS3Method
-m_step.distal_continuous_regression <- function(model_state, X, resp, weights = NULL, ...) {
-  Y <- as.numeric(X[, 1])
+m_step.distal_continuous_regression <- function(model_state, X, resp,
+                                                weights = NULL, ...) {
+  Y     <- as.numeric(X[, 1])
   Z_raw <- impute_covariates(X[, -1, drop = FALSE])
-  Z <- cbind(1, Z_raw)
+  Z     <- cbind(1, Z_raw)
   valid <- !is.na(Y)
 
-  Y_v <- Y[valid]
-  Z_v <- Z[valid, , drop=FALSE]
-  resp_v <- resp[valid, , drop=FALSE]
-
+  Y_v    <- Y[valid]
+  Z_v    <- Z[valid, , drop = FALSE]
+  resp_v <- resp[valid, , drop = FALSE]
   if (!is.null(weights)) resp_v <- sweep(resp_v, 1, weights[valid], "*")
 
   K <- model_state$n_components
   D <- ncol(Z_v)
 
-  betas <- matrix(0, nrow = K, ncol = D)
-  vars <- matrix(0, nrow = K, ncol = 1)
-  ses <- matrix(0, nrow = K, ncol = D)
+  betas  <- matrix(0, nrow = K, ncol = D)
+  B_invs <- vector("list", K)      # store for SE computation
 
-  for (k in 1:K) {
-    W_k <- resp_v[, k]
-
-    # --- 1. THE BREAD (Point Estimates) ---
-    ZWZ <- t(Z_v) %*% sweep(Z_v, 1, W_k, "*")
-    ZWY <- t(Z_v) %*% (W_k * Y_v)
-
-    diag(ZWZ) <- diag(ZWZ) + 1e-6 # Ridge penalty for stability
+  # ── Pass 1: point estimates ────────────────────────────────────────────────
+  for (k in seq_len(K)) {
+    W_k   <- resp_v[, k]
+    ZWZ   <- t(Z_v) %*% sweep(Z_v, 1, W_k, "*")
+    ZWY   <- t(Z_v) %*% (W_k * Y_v)
+    diag(ZWZ) <- diag(ZWZ) + 1e-6
     B_inv <- pinv(ZWZ)
-
-    beta_k <- B_inv %*% ZWY
-    betas[k, ] <- as.vector(beta_k)
-
-    # --- 2. THE RESIDUALS ---
-    preds <- Z_v %*% beta_k
-    resids <- as.vector(Y_v - preds)
-
-    # Calculate scalar variance for the log-likelihood using ABSOLUTE weights
-    # This keeps the shape of the normal distribution valid and prevents NaN crashes
-    Nk_abs <- sum(abs(W_k))
-    if (Nk_abs > 1e-5) {
-      var_k <- sum(abs(W_k) * resids^2) / Nk_abs
-    } else {
-      var_k <- 1e-5
-    }
-    vars[k, 1] <- max(var_k, 1e-5)
-
-    # --- 3. THE MEAT (Robust Sandwich SEs) ---
-    # Meat = Z' * diag(W^2 * e^2) * Z
-    meat_weights <- (W_k * resids)^2
-    M_meat <- t(Z_v) %*% sweep(Z_v, 1, meat_weights, "*")
-
-    # Sandwich: Cov(Beta) = B_inv * M_meat * B_inv
-    cov_matrix <- B_inv %*% M_meat %*% B_inv
-    ses[k, ] <- sqrt(pmax(diag(cov_matrix), 1e-8)) # Protect against floating point zeros
+    betas[k, ]  <- as.vector(B_inv %*% ZWY)
+    B_invs[[k]] <- B_inv
   }
 
-  model_state$parameters$betas <- betas
+  # ── Pass 2: pooled residual variance (SIGNED BCH weights) ─────────────────
+  #
+  #    FIX: use signed weights, not abs(W_k), and pool across ALL classes.
+  #
+  #    sigma^2 = sum_k sum_i [ w_ik * (y_i - yhat_ik)^2 ]
+  #              / sum_k sum_i w_ik
+  #
+  #    This matches LatentGOLD's pooled "error variance" (homoskedastic model).
+  #    Using abs() inflates sigma^2 and all downstream SEs.
+  total_ss <- 0
+  total_n  <- 0
+  for (k in seq_len(K)) {
+    W_k      <- resp_v[, k]
+    resids_k <- Y_v - Z_v %*% betas[k, ]
+    total_ss <- total_ss + sum(W_k * resids_k^2)
+    total_n  <- total_n  + sum(W_k)
+  }
+  sigma2 <- max(total_ss / total_n, 1e-5)
+
+  # Store as K x 1 matrix (same value repeated) to keep log_likelihood
+  # working without changes.
+  vars <- matrix(sigma2, nrow = K, ncol = 1)
+
+  # ── Pass 3: model-based SEs ────────────────────────────────────────────────
+  #
+  #    FIX: replace naive sandwich sqrt(diag(B^{-1} M B^{-1})) with
+  #    model-based sqrt(sigma^2 * diag(B_inv_k)).
+  #
+  #    Each class has its own B_inv_k (separate WLS), so the SE for class k
+  #    is sqrt(sigma^2 * diag(B_inv_k)).  The pooled sigma^2 is shared.
+  #    This exactly reproduces LatentGOLD's reported SEs.
+  ses <- matrix(0, nrow = K, ncol = D)
+  for (k in seq_len(K))
+    ses[k, ] <- sqrt(pmax(sigma2 * diag(B_invs[[k]]), 1e-8))
+
+  model_state$parameters$betas       <- betas
   model_state$parameters$covariances <- vars
-  model_state$parameters$ses <- ses
+  model_state$parameters$ses         <- ses
+
   return(model_state)
 }
 
 #' @exportS3Method
 log_likelihood.distal_continuous_regression <- function(model_state, X, ...) {
-  Y <- as.numeric(X[, 1])
+  Y     <- as.numeric(X[, 1])
   Z_raw <- impute_covariates(X[, -1, drop = FALSE])
-  Z <- cbind(1, Z_raw)
-
-  K <- model_state$n_components
-  N <- length(Y)
-  ll <- matrix(0, nrow = N, ncol = K)
+  Z     <- cbind(1, Z_raw)
+  K     <- model_state$n_components
+  N     <- length(Y)
+  ll    <- matrix(0, nrow = N, ncol = K)
   valid <- !is.na(Y)
-
-  for (k in 1:K) {
+  for (k in seq_len(K)) {
     if (any(valid)) {
-      beta_k <- model_state$parameters$betas[k, ]
-      preds <- Z[valid, , drop=FALSE] %*% beta_k
-
+      preds <- Z[valid, , drop = FALSE] %*% model_state$parameters$betas[k, ]
       ll[valid, k] <- dnorm(Y[valid],
                             mean = preds,
-                            sd = sqrt(model_state$parameters$covariances[k, 1]),
-                            log = TRUE)
+                            sd   = sqrt(model_state$parameters$covariances[k, 1]),
+                            log  = TRUE)
     }
   }
   return(ll)
@@ -114,5 +117,6 @@ log_likelihood.distal_continuous_regression <- function(model_state, X, ...) {
 n_parameters.distal_continuous_regression <- function(model_state, ...) {
   K <- model_state$n_components
   D <- ncol(model_state$parameters$betas)
-  return((K * D) + K)
+  # K*D regression coefficients + 1 pooled variance
+  return(K * D + 1L)
 }

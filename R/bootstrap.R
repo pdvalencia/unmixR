@@ -159,15 +159,9 @@ bootstrap_covariates <- function(model_state, X, Y, n_reps = 100,
 
   boot_betas <- array(NA, dim = c(n_reps, K, D_cov))
 
-  cat(sprintf("Running bootstrap with alignment (Ref Class: %d, %d reps)...\n",
-              ref_class, n_reps))
-  pb <- txtProgressBar(min = 0, max = n_reps, style = 3)
-
   # Retrieve the original measurement descriptor stored by fit_mixture().
   # Using class(model_state$mm)[1] was wrong for nested models: it returns
   # "nested", which build_emission() does not recognise as a string descriptor.
-  # The stored descriptor (a list or a string) faithfully reproduces the
-  # original measurement specification in each bootstrap replicate (Bug 2 fix).
   measurement_desc <- model_state$measurement_descriptor
   if (is.null(measurement_desc))
     stop(paste(
@@ -176,46 +170,96 @@ bootstrap_covariates <- function(model_state, X, Y, n_reps = 100,
       "which stores the descriptor automatically."
     ))
 
-  for (i in 1:n_reps) {
-    idx    <- sample(1:n_samples, replace = TRUE)
+  cat(sprintf("Running bootstrap with alignment (Ref Class: %d, %d reps)...\n",
+              ref_class, n_reps))
+
+  for (i in seq_len(n_reps)) {
+    idx    <- sample(seq_len(n_samples), replace = TRUE)
     X_boot <- X[idx, , drop = FALSE]
     Y_boot <- Y[idx, , drop = FALSE]
 
     b_model <- fit_mixture(
       X = X_boot, Y = Y_boot, n_components = K,
-      measurement  = measurement_desc,   # use stored descriptor (Bug 2 fix)
+      measurement  = measurement_desc,
       structural   = "covariate",
       n_steps      = 3,
       correction   = "ML",
       n_init       = 1,
-      order_by_size = FALSE   # preserve internal order for alignment
+      order_by_size = FALSE
     )
 
-    # Align bootstrap classes to original model using get_mm_alignment_matrix()
-    # so Gaussian and nested models are handled correctly (Bug 3 fix).
     boot_align_mat <- get_mm_alignment_matrix(b_model$mm)
     mapping        <- align_classes(orig_align_mat, boot_align_mat)
     aligned_betas  <- b_model$sm$parameters$beta[mapping, ]
 
-    # Centre on the reference class
     aligned_betas_ref <- sweep(aligned_betas, 2,
                                aligned_betas[ref_class, ], "-")
     boot_betas[i, , ] <- aligned_betas_ref
-    setTxtProgressBar(pb, i)
+
+    # Print progress every 10% of reps
+    milestone <- max(1L, n_reps %/% 10L)
+    if (i %% milestone == 0L || i == n_reps)
+      cat(sprintf("  %d / %d reps completed.\n", i, n_reps))
   }
-  close(pb)
 
   se_betas <- apply(boot_betas, c(2, 3), sd)
   z_scores <- orig_betas / se_betas
   p_values <- 2 * (1 - pnorm(abs(z_scores)))
 
-  rownames(p_values) <- paste("Class", 1:K)
+  # Reference class has zero SE by construction — mark explicitly as NA
+  p_values[ref_class, ] <- NA_real_
+
+  rownames(se_betas) <- paste("Class", seq_len(K))
+  rownames(p_values) <- paste("Class", seq_len(K))
+  rownames(se_betas)[ref_class] <- paste("Class", ref_class, "(Ref)")
   rownames(p_values)[ref_class] <- paste("Class", ref_class, "(Ref)")
 
-  return(list(
+  result <- list(
     standard_errors = se_betas,
     p_values        = p_values,
     boot_betas      = boot_betas,
-    orig_betas      = orig_betas
-  ))
+    orig_betas      = orig_betas,
+    ref_class       = ref_class,
+    n_reps          = n_reps
+  )
+  class(result) <- c("mixture_bootstrap", "list")
+  return(result)
+}
+
+#' @export
+print.mixture_bootstrap <- function(x, ...) {
+  ref_class <- x$ref_class
+  K         <- nrow(x$p_values)
+  D         <- ncol(x$p_values)
+  cov_names <- colnames(x$p_values)
+
+  cat("=========================================================\n")
+  cat("           BOOTSTRAP RESULTS (COVARIATE MODEL)           \n")
+  cat("=========================================================\n")
+  cat(sprintf("Reference Class : %d   Replications: %d\n",
+              ref_class, x$n_reps))
+  cat("---------------------------------------------------------\n")
+  cat("P-Values\n\n")
+
+  # Header
+  cat(sprintf("  %-16s", ""))
+  for (nm in cov_names) cat(sprintf("  %-10s", nm))
+  cat("\n")
+
+  for (k in seq_len(K)) {
+    cat(sprintf("  %-16s", rownames(x$p_values)[k]))
+    for (v in seq_len(D)) {
+      p <- x$p_values[k, v]
+      if (is.na(p)) {
+        cat(sprintf("  %-10s", "(Ref)"))
+      } else if (p < 0.001) {
+        cat(sprintf("  %-10s", "< .001"))
+      } else {
+        cat(sprintf("  %-10s", sprintf("%.3f", p)))
+      }
+    }
+    cat("\n")
+  }
+  cat("=========================================================\n")
+  invisible(x)
 }

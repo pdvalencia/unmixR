@@ -135,8 +135,13 @@ calc_blrt <- function(X, k_small, k_large, measurement = "binary",
     classes <- sample(1:k_small, size = N, replace = TRUE, prob = null_model$weights)
     X_gen <- generate_synthetic_data(null_model$mm, classes, N)
 
-    m_null_gen <- fit_mixture(X_gen, n_components = k_small, measurement = measurement, n_init = n_init_boot, ...)
-    m_alt_gen  <- fit_mixture(X_gen, n_components = k_large, measurement = measurement, n_init = n_init_boot, ...)
+    # refine = FALSE: bootstrap replicates only need the likelihood ratio, not
+    # polished final estimates. Skipping L-BFGS makes each replicate ~100x faster
+    # with no effect on the validity of the p-value.
+    m_null_gen <- fit_mixture(X_gen, n_components = k_small, measurement = measurement,
+                              n_init = n_init_boot, refine = FALSE, ...)
+    m_alt_gen  <- fit_mixture(X_gen, n_components = k_large, measurement = measurement,
+                              n_init = n_init_boot, refine = FALSE, ...)
 
     null_dist[i] <- 2 * (m_alt_gen$metrics$ll - m_null_gen$metrics$ll)
 

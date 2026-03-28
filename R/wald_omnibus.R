@@ -88,5 +88,13 @@ wald_omnibus_test <- function(boot_results, term_name, assume_independence = TRU
   df <- length(beta_hat)
   p_val <- pchisq(W_stat, df = df, lower.tail = FALSE)
 
-  return(data.frame(Covariate = term_name, Wald_Chi2 = round(W_stat, 3), df = df, p_value = round(p_val, 4)))
+  result <- data.frame(
+    Covariate = term_name,
+    Wald_Chi2 = round(W_stat, 3),
+    df        = df,
+    p_value   = p_val
+  )
+  class(result) <- c("mixture_wald", "data.frame")
+  result$Method <- "Bootstrap"
+  return(result)
 }

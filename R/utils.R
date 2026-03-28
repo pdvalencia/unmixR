@@ -157,3 +157,75 @@ distal_forward <- function(Z, beta_matrix) {
   exp_logits    <- exp(sweep(logits_full, 1, max_logits, "-"))
   return(sweep(exp_logits, 1, rowSums(exp_logits), "/"))
 }
+
+# ==============================================================================
+# prepare_covariates()
+#
+# Converts a user-supplied Y (data.frame, matrix, or vector) into a plain
+# numeric matrix suitable for structural models, with two behaviours:
+#
+#   * Numeric / integer columns are passed through unchanged.
+#   * Factor / character columns are dummy-coded (reference = first level):
+#       - 2-level factor  → 1 binary column named after the variable
+#       - k-level factor  → k-1 columns named "var.level2", "var.level3", ...
+#
+# Column names are always preserved / generated, so downstream summary
+# functions can display real variable names instead of Z1, Z2, etc.
+# ==============================================================================
+prepare_covariates <- function(Y) {
+  # Plain numeric matrix — nothing to do
+  if (is.matrix(Y) && is.numeric(Y)) return(Y)
+
+  # Bare numeric vector — wrap in single-column matrix
+  if (is.numeric(Y) && is.null(dim(Y)))
+    return(matrix(Y, ncol = 1L,
+                  dimnames = list(NULL, deparse(substitute(Y)))))
+
+  df <- as.data.frame(Y)
+  out_cols <- vector("list", ncol(df))
+  idx <- 0L
+
+  for (nm in names(df)) {
+    col <- df[[nm]]
+
+    # ── numeric / integer: pass through ──────────────────────────────────────
+    if (is.numeric(col) || is.integer(col)) {
+      idx <- idx + 1L
+      m   <- matrix(as.numeric(col), ncol = 1L,
+                    dimnames = list(NULL, nm))
+      out_cols[[idx]] <- m
+      next
+    }
+
+    # ── factor / character: dummy-code ───────────────────────────────────────
+    if (!is.factor(col)) col <- factor(col)
+    lvls <- levels(col)
+
+    if (length(lvls) < 2L) {
+      warning(sprintf(
+        "prepare_covariates: variable '%s' has fewer than 2 levels and will be dropped.",
+        nm))
+      next
+    }
+
+    other <- lvls[-1L]   # reference = first level
+
+    if (length(other) == 1L) {
+      # Binary: single column named "var.Level" so the active level is clear
+      idx <- idx + 1L
+      out_cols[[idx]] <- matrix(as.integer(col == other),
+                                ncol = 1L,
+                                dimnames = list(NULL, paste0(nm, ".", other)))
+    } else {
+      # Multicategorical: k-1 columns named "var.levelX"
+      idx <- idx + 1L
+      m   <- matrix(0L, nrow = length(col), ncol = length(other),
+                    dimnames = list(NULL, paste0(nm, ".", other)))
+      for (j in seq_along(other))
+        m[, j] <- as.integer(col == other[j])
+      out_cols[[idx]] <- m
+    }
+  }
+
+  do.call(cbind, out_cols[seq_len(idx)])
+}

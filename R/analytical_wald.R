@@ -90,8 +90,29 @@ analytical_wald_test <- function(model, term_name, ref_class = 1) {
   df <- num_tests
   p_val <- pchisq(W_stat, df = df, lower.tail = FALSE)
 
-  return(data.frame(
-    Covariate = term_name, Wald_Chi2 = round(W_stat, 3),
-    df = df, p_value = round(p_val, 4), Method = "Analytical"
-  ))
+  result <- data.frame(
+    Covariate = term_name,
+    Wald_Chi2 = round(W_stat, 3),
+    df        = df,
+    p_value   = p_val,
+    Method    = "Analytical"
+  )
+  class(result) <- c("mixture_wald", "data.frame")
+  return(result)
+}
+
+#' @export
+print.mixture_wald <- function(x, ...) {
+  cat("=========================================================\n")
+  cat("                 WALD TEST (COVARIATE)                   \n")
+  cat("=========================================================\n")
+  cat(sprintf("  Covariate : %s\n", x$Covariate))
+  cat(sprintf("  Method    : %s\n", x$Method))
+  cat("---------------------------------------------------------\n")
+  cat(sprintf("  Wald \u03c7\u00b2(%d) = %.3f,  p%s\n",
+              x$df, x$Wald_Chi2,
+              if (x$p_value < 0.001) " < .001"
+              else sprintf(" = %.3f", x$p_value)))
+  cat("=========================================================\n")
+  invisible(x)
 }

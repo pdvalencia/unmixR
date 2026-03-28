@@ -45,8 +45,10 @@
 #' }
 #'
 #' @export
-confint.mixture_model <- function(object, parm = NULL, level = 0.95, boot_results = NULL, ref_class = 1, ...) {
-  if (is.null(object$sm) || !inherits(object$sm, "covariate")) stop("No covariate model.")
+confint.mixture_model <- function(object, parm = NULL, level = 0.95,
+                                  boot_results = NULL, ref_class = 1, ...) {
+  if (is.null(object$sm) || !inherits(object$sm, "covariate"))
+    stop("No covariate model.")
 
   K <- object$n_components
 
@@ -57,62 +59,111 @@ confint.mixture_model <- function(object, parm = NULL, level = 0.95, boot_result
       K, ref_class
     ))
 
-  D <- ncol(object$sm$parameters$beta)
+  D      <- ncol(object$sm$parameters$beta)
   z_crit <- qnorm(1 - (1 - level) / 2)
 
-  # 1. Extract Beta (centered on ref_class)
-  betas <- object$sm$parameters$beta
+  # 1. Extract betas centered on ref_class
+  betas     <- object$sm$parameters$beta
   betas_ref <- sweep(betas, 2, betas[ref_class, ], "-")
 
-  # 2. Determine Standard Errors (Analytical vs Bootstrapped)
+  # 2. Determine standard errors
   if (!is.null(boot_results)) {
-    message("Calculating Bootstrapped Confidence Intervals...")
-    se <- boot_results$standard_errors # Already centered by our bootstrap function
+    method <- "Bootstrap"
+
+    # boot_betas is n_reps x K x D, centered on whatever ref_class was used
+    # when bootstrap_covariates() was called.  Re-center on the requested
+    # ref_class so SEs match the contrasts in betas_ref.
+    boot_betas <- boot_results$boot_betas   # n_reps x K x D
+    ref_mat    <- boot_betas[, ref_class, ] # n_reps x D
+
+    boot_recentered <- boot_betas
+    for (k in seq_len(K))
+      boot_recentered[, k, ] <- boot_betas[, k, ] - ref_mat
+
+    se <- apply(boot_recentered, c(2, 3), sd)
+
   } else {
-    message("Calculating Analytical Confidence Intervals (Hessian)...")
+    method <- "Analytical (Hessian)"
     H <- object$sm$parameters$hessian
     if (is.null(H)) stop("Hessian missing. Refit model.")
 
-    # Extract SEs from the diagonal of the inverted Hessian
-    # Note: Analytical SEs are for the absolute parameters;
-    # for differences (vs ref), we use the contrast matrix logic
     Sigma <- pinv(-H)
-    se <- matrix(0, nrow = K, ncol = D)
-    for (c in 1:K) {
-      for (v in 1:D) {
-        # Variance of a difference: Var(B_c - B_ref) = Var(B_c) + Var(B_ref) - 2*Cov(B_c, B_ref)
-        idx_c <- (c - 1) * D + v
-        idx_ref <- (ref_class - 1) * D + v
-        var_diff <- Sigma[idx_c, idx_c] + Sigma[idx_ref, idx_ref] - 2 * Sigma[idx_c, idx_ref]
-        se[c, v] <- sqrt(pmax(0, var_diff))
+    se    <- matrix(0, nrow = K, ncol = D)
+    for (c in seq_len(K)) {
+      for (v in seq_len(D)) {
+        idx_c   <- (c - 1L) * D + v
+        idx_ref <- (ref_class - 1L) * D + v
+        var_diff <- Sigma[idx_c, idx_c] + Sigma[idx_ref, idx_ref] -
+          2 * Sigma[idx_c, idx_ref]
+        se[c, v] <- sqrt(max(0, var_diff))
       }
     }
   }
 
-  # 3. Calculate Bounds
+  # 3. Compute bounds on the log-OR scale, then exponentiate
   lower_beta <- betas_ref - z_crit * se
   upper_beta <- betas_ref + z_crit * se
 
-  # 4. Transform to Odds Ratios
   OR <- exp(betas_ref)
   LB <- exp(lower_beta)
   UB <- exp(upper_beta)
 
-  # 5. Format Output
-  res_list <- list()
+  # 4. Build result list (one data frame per predictor)
   cov_names <- colnames(betas)
   if (is.null(cov_names)) cov_names <- paste0("V", seq_len(D))
 
-  for (v in 1:D) {
-    df <- data.frame(
-      OR = OR[, v],
-      Lower = LB[, v],
-      Upper = UB[, v]
-    )
-    rownames(df) <- paste("Class", 1:K)
-    rownames(df)[ref_class] <- paste("Class", ref_class, "(Ref)")
-    res_list[[cov_names[v]]] <- round(df, 3)
+  row_labels              <- paste("Class", seq_len(K))
+  row_labels[ref_class]   <- paste("Class", ref_class, "(Ref)")
+
+  res_list <- vector("list", D)
+  names(res_list) <- cov_names
+
+  for (v in seq_len(D)) {
+    df <- data.frame(OR    = round(OR[, v], 3),
+                     Lower = round(LB[, v], 3),
+                     Upper = round(UB[, v], 3),
+                     row.names = row_labels)
+    res_list[[v]] <- df
   }
 
+  # Attach metadata for the print method
+  attr(res_list, "ref_class") <- ref_class
+  attr(res_list, "level")     <- level
+  attr(res_list, "method")    <- method
+  class(res_list) <- c("mixture_confint", "list")
+
   return(res_list)
+}
+
+#' @export
+print.mixture_confint <- function(x, ...) {
+  ref_class <- attr(x, "ref_class")
+  level     <- attr(x, "level")
+  method    <- attr(x, "method")
+  pct       <- paste0(round(level * 100), "%")
+
+  cat("=========================================================\n")
+  cat("        CONFIDENCE INTERVALS FOR ODDS RATIOS             \n")
+  cat("=========================================================\n")
+  cat(sprintf("Reference Class : %d\n", ref_class))
+  cat(sprintf("Level           : %s   Method: %s\n", pct, method))
+  cat("---------------------------------------------------------\n")
+  cat(sprintf("  %-16s  %7s  %7s  %7s\n", "", "OR", "Lower", "Upper"))
+
+  for (nm in names(x)) {
+    cat(sprintf("\n%s\n", nm))
+    df <- x[[nm]]
+    for (i in seq_len(nrow(df))) {
+      is_ref <- grepl("\\(Ref\\)", rownames(df)[i])
+      if (is_ref) {
+        cat(sprintf("  %-16s  %7.3f  %7s  %7s\n",
+                    rownames(df)[i], df$OR[i], "—", "—"))
+      } else {
+        cat(sprintf("  %-16s  %7.3f  %7.3f  %7.3f\n",
+                    rownames(df)[i], df$OR[i], df$Lower[i], df$Upper[i]))
+      }
+    }
+  }
+  cat("=========================================================\n")
+  invisible(x)
 }
